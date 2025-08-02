@@ -61,38 +61,43 @@ func TestMakeBar(t *testing.T) {
 	testCases := []struct {
 		name     string
 		percent  float64
+		width    int
 		expected string
 	}{
-		{name: "Zero Percent", percent: 0, expected: "[green]────────────────────[white]"},
-		{name: "50 Percent", percent: 50, expected: "[green]██████████──────────[white]"},
-		{name: "100 Percent", percent: 100, expected: "[green]████████████████████[white]"},
-		{name: "Over 100 Percent", percent: 150, expected: "[green]████████████████████[white]"},
-		{name: "Negative Percent", percent: -10, expected: "[green]────────────────────[white]"},
-		{name: "Fractional Percent (25%)", percent: 25, expected: "[green]█████───────────────[white]"},
-		{name: "Fractional Percent (78%)", percent: 78, expected: "[green]███████████████─────[white]"},
+		{name: "Zero Percent (width 20)", percent: 0, width: 20, expected: "[green]────────────────────[white]"},
+		{name: "50 Percent (width 20)", percent: 50, width: 20, expected: "[green]██████████──────────[white]"},
+		{name: "100 Percent (width 20)", percent: 100, width: 20, expected: "[green]████████████████████[white]"},
+		{name: "50 Percent (width 10)", percent: 50, width: 10, expected: "[green]█████─────[white]"},
+		{name: "75 Percent (width 10)", percent: 75, width: 10, expected: "[green]███████───[white]"},
+		{name: "Zero width", percent: 100, width: 0, expected: "[green][white]"},
+		{name: "Negative width", percent: 100, width: -5, expected: "[green][white]"},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := makeBar(tc.percent)
+			actual := makeBar(tc.percent, tc.width)
 			if actual != tc.expected {
-				t.Errorf("makeBar(%.2f) = \n%q\nwant:\n%q", tc.percent, actual, tc.expected)
+				t.Errorf("makeBar(%.2f, %d) = \n%q\nwant:\n%q", tc.percent, tc.width, actual, tc.expected)
 			}
 		})
 	}
 }
 
 // TestMakeBarWidth verifies that the bar's visible character width is always consistent.
-func TestMakeBarWidth(t *testing.T) {
-	testCases := []float64{0, 25, 50, 75, 100, 110}
-	expectedWidth := 20
-	for _, percent := range testCases {
-		t.Run(fmt.Sprintf("Percent_%.0f", percent), func(t *testing.T) {
-			barString := makeBar(percent)
+func TestMakeBarDynamicWidth(t *testing.T) {
+	testWidths := []int{0, 1, 10, 20, 33}
+
+	for _, width := range testWidths {
+		t.Run(fmt.Sprintf("Width_%d", width), func(t *testing.T) {
+			barString := makeBar(50, width) // Use 50% as a sample percentage
+
+			// Strip the color tags to measure the actual visible characters.
 			cleanString := strings.Replace(barString, "[green]", "", 1)
 			cleanString = strings.Replace(cleanString, "[white]", "", 1)
+
 			actualWidth := len([]rune(cleanString))
-			if actualWidth != expectedWidth {
-				t.Errorf("Bar width is incorrect. Got %d, want %d for input %.2f%%", actualWidth, expectedWidth, percent)
+
+			if actualWidth != width {
+				t.Errorf("Bar width is incorrect. Got %d, want %d", actualWidth, width)
 			}
 		})
 	}

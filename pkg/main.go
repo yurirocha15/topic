@@ -247,52 +247,58 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	state.dynamic.mu.Lock()
 	defer state.dynamic.mu.Unlock()
 
+	// Get the available width inside the view, minus padding.
+	_, _, availableWidth, _ := view.GetInnerRect()
+	availableWidth -= 2 // Account for horizontal padding within the box
+
 	var builder strings.Builder
 
 	// --- CPU ---
-	cpuLimitStr := fmt.Sprintf("(limit: %.2f CPUs)", state.static.ContainerCPULimit)
+	cpuLabel := fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", state.dynamic.ContainerCPUUsage)
+	cpuInfo := fmt.Sprintf(" [darkcyan](limit: %.2f CPUs)[white]", state.static.ContainerCPULimit)
 	if state.static.ContainerCPULimit == float64(state.static.HostCores) {
-		cpuLimitStr = fmt.Sprintf("(no cgroup limit, %d host cores)", state.static.HostCores)
+		cpuInfo = fmt.Sprintf(" [darkcyan](no cgroup limit, %d host cores)[white]", state.static.HostCores)
 	}
-	builder.WriteString(fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] %s [darkcyan]%s[white]\n",
-		state.dynamic.ContainerCPUUsage,
-		makeBar(state.dynamic.ContainerCPUUsage),
-		cpuLimitStr))
+	// Calculate the width for the bar by subtracting the label and info text lengths.
+	cpuBarWidth := availableWidth - tview.TaggedStringWidth(cpuLabel) - tview.TaggedStringWidth(cpuInfo)
+	builder.WriteString(cpuLabel + makeBar(state.dynamic.ContainerCPUUsage, cpuBarWidth) + cpuInfo + "\n")
 
 	// --- Memory ---
 	memPercent := 0.0
 	if state.static.ContainerMemLimitBytes > 0 {
 		memPercent = (state.dynamic.ContainerMemUsedGB * 1024 * 1024 * 1024 / float64(state.static.ContainerMemLimitBytes)) * 100
 	}
-	memUsageStr := fmt.Sprintf("%.3f GB / %.3f GB", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
+	memLabel := fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
+	memInfo := fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB[white]", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
 	if state.static.ContainerMemLimitGB == 0 {
-		memUsageStr = fmt.Sprintf("%.3f GB / N/A", state.dynamic.ContainerMemUsedGB)
+		memInfo = fmt.Sprintf(" [darkcyan]%.3f GB / N/A[white]", state.dynamic.ContainerMemUsedGB)
 	}
-	builder.WriteString(fmt.Sprintf("Mem: [yellow]%-6.1f%%[white] %s [darkcyan]%s[white]\n",
-		memPercent,
-		makeBar(memPercent),
-		memUsageStr))
+	memBarWidth := availableWidth - tview.TaggedStringWidth(memLabel) - tview.TaggedStringWidth(memInfo)
+	builder.WriteString(memLabel + makeBar(memPercent, memBarWidth) + memInfo + "\n")
 
 	// --- GPUs ---
 	if state.static.GPUCount > 0 {
 		builder.WriteString("\n")
 		for i, gpu := range state.dynamic.LiveGPUUsage {
+			// GPU Utilization
+			gpuUtilLabel := fmt.Sprintf("GPU%d Util: [yellow]%-3d%%[white] ", i, gpu.Utilization)
+			gpuUtilBarWidth := availableWidth - tview.TaggedStringWidth(gpuUtilLabel)
+			builder.WriteString(gpuUtilLabel + makeBar(float64(gpu.Utilization), gpuUtilBarWidth) + "\n")
+
+			// GPU Memory
 			gpuMemPercent := 0.0
 			if state.static.GPUTotalGB[i] > 0 {
 				gpuMemPercent = (gpu.MemUsedGB / state.static.GPUTotalGB[i]) * 100
 			}
-			gpuMemUsageStr := fmt.Sprintf("%.2f GB / %.2f GB", gpu.MemUsedGB, state.static.GPUTotalGB[i])
-
-			builder.WriteString(fmt.Sprintf("GPU%d Util: [yellow]%-3d%%[white] %s\n",
-				i, gpu.Utilization, makeBar(float64(gpu.Utilization))))
-			builder.WriteString(fmt.Sprintf("GPU%d Mem:  [yellow]%-3.0f%%[white] %s [darkcyan]%s[white]\n",
-				i, gpuMemPercent, makeBar(gpuMemPercent), gpuMemUsageStr))
+			gpuMemLabel := fmt.Sprintf("GPU%d Mem:  [yellow]%-3.0f%%[white] ", i, gpuMemPercent)
+			gpuMemInfo := fmt.Sprintf(" [darkcyan]%.2f GB / %.2f GB[white]", gpu.MemUsedGB, state.static.GPUTotalGB[i])
+			gpuMemBarWidth := availableWidth - tview.TaggedStringWidth(gpuMemLabel) - tview.TaggedStringWidth(gpuMemInfo)
+			builder.WriteString(gpuMemLabel + makeBar(gpuMemPercent, gpuMemBarWidth) + gpuMemInfo + "\n")
 		}
 	}
 
 	finalText := builder.String()
 	view.SetText(finalText)
-
 	return strings.Count(finalText, "\n")
 }
 
@@ -342,8 +348,12 @@ func updateProcessTable(table *tview.Table, state *State) {
 }
 
 // makeBar creates a visual bar representation of a percentage.
-func makeBar(percent float64) string {
-	barWidth := 20
+func makeBar(percent float64, barWidth int) string {
+	// Ensure barWidth is not negative.
+	if barWidth < 0 {
+		barWidth = 0
+	}
+
 	filledWidth := int((float64(barWidth) * percent) / 100.0)
 	if filledWidth > barWidth {
 		filledWidth = barWidth
