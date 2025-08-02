@@ -25,11 +25,9 @@ jobs:
           cache: true
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.55.2
-          only-new-issues: false
-          args: --install-only
+          version: v2.1
 
       - name: Run all checks via Makefile
         run: make ci-check
