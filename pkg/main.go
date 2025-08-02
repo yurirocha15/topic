@@ -19,6 +19,46 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
+// --- Interfaces ---
+
+// FileReader defines an interface for reading files.
+type FileReader interface {
+	ReadFile(path string) ([]byte, error)
+}
+
+// OSFileReader is the default implementation of FileReader using the os package.
+type OSFileReader struct{}
+
+func (fs OSFileReader) ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+// CommandRunner defines an interface for running external commands, allowing for mocking.
+type CommandRunner interface {
+	Output(name string, arg ...string) ([]byte, error)
+}
+
+// OSCommandRunner is the default implementation using the os/exec package.
+type OSCommandRunner struct{}
+
+func (ocr OSCommandRunner) Output(name string, arg ...string) ([]byte, error) {
+	return exec.Command(name, arg...).Output()
+}
+
+// Stater defines an interface for checking file status.
+type Stater interface {
+	Stat(path string) (os.FileInfo, error)
+}
+
+// OSStater is the default implementation of Stater using the os package.
+type OSStater struct{}
+
+func (s OSStater) Stat(path string) (os.FileInfo, error) {
+	return os.Stat(path)
+}
+
+// --- Data Structures ---
+
 // CgroupVersion denotes the cgroup version (1 or 2)
 type CgroupVersion int
 
@@ -86,7 +126,11 @@ type State struct {
 // --- Main Application ---
 
 func main() {
-	staticInfo, err := getStaticInfo()
+	fileReader := OSFileReader{}
+	cmdRunner := OSCommandRunner{}
+	stater := OSStater{}
+
+	staticInfo, err := getStaticInfo(fileReader, cmdRunner, stater)
 	if err != nil {
 		log.Printf("Could not get all static info: %v. Continuing...", err)
 	}
@@ -140,7 +184,7 @@ func main() {
 		defer ticker.Stop()
 		for {
 			<-ticker.C
-			updateAll(state)
+			updateAll(state, fileReader, cmdRunner)
 			app.QueueUpdateDraw(func() {
 				// Update all components and dynamically resize the top panel
 				leftHeight := updateResourceView(resourceView, state)
@@ -161,7 +205,7 @@ func main() {
 	})
 
 	// Initial data load and draw
-	updateAll(state)
+	updateAll(state, fileReader, cmdRunner)
 	leftHeight := updateResourceView(resourceView, state)
 	rightHeight := updateInfoView(infoView)
 	topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + 2
@@ -315,26 +359,29 @@ func makeBar(percent float64) string {
 // --- Data Fetching Functions ---
 
 // updateAll fetches all dynamic data and updates the state.
-func updateAll(state *State) {
+func updateAll(state *State, fs FileReader, runner CommandRunner) {
 	state.dynamic.mu.Lock()
 	defer state.dynamic.mu.Unlock()
 	var wg sync.WaitGroup
 	wg.Add(4)
-	go func() { defer wg.Done(); state.dynamic.ContainerCPUUsage = updateContainerCPUUsage(state) }()
+	go func() { defer wg.Done(); state.dynamic.ContainerCPUUsage = updateContainerCPUUsage(state, fs) }()
 	go func() {
 		defer wg.Done()
-		state.dynamic.ContainerMemUsedGB = updateContainerMemUsage(state.static.CgroupVersion)
+		state.dynamic.ContainerMemUsedGB = updateContainerMemUsage(state.static.CgroupVersion, fs)
 	}()
-	go func() { defer wg.Done(); state.dynamic.LiveGPUUsage = updateLiveGPUUsage(state.static.GPUCount) }()
-	go func() { defer wg.Done(); state.dynamic.Processes = updateProcessList(&state.static) }()
+	go func() {
+		defer wg.Done()
+		state.dynamic.LiveGPUUsage = updateLiveGPUUsage(state.static.GPUCount, runner)
+	}()
+	go func() { defer wg.Done(); state.dynamic.Processes = updateProcessList(&state.static, runner) }()
 	wg.Wait()
 }
 
 // getStaticInfo fetches static information about the container and host.
-func getStaticInfo() (StaticInfo, error) {
+func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticInfo, error) {
 	var info StaticInfo
 	var err error
-	if _, err := os.Stat("/sys/fs/cgroup/cpu.max"); os.IsNotExist(err) {
+	if _, err := stater.Stat("/sys/fs/cgroup/cpu.max"); os.IsNotExist(err) {
 		info.CgroupVersion = CgroupV1
 	} else {
 		info.CgroupVersion = CgroupV2
@@ -343,15 +390,15 @@ func getStaticInfo() (StaticInfo, error) {
 	if err != nil {
 		info.HostCores = 1
 	}
-	info.ContainerCPULimit = getContainerCPULimit(info.CgroupVersion, info.HostCores)
-	info.ContainerMemLimitBytes, info.ContainerMemLimitGB = getContainerMemLimit(info.CgroupVersion)
-	info.GPUCount, info.GPUTotalGB = getStaticGPUInfo()
+	info.ContainerCPULimit = getContainerCPULimit(info.CgroupVersion, info.HostCores, fs)
+	info.ContainerMemLimitBytes, info.ContainerMemLimitGB = getContainerMemLimit(info.CgroupVersion, fs)
+	info.GPUCount, info.GPUTotalGB = getStaticGPUInfo(runner)
 	return info, nil
 }
 
 // readUintFromFile reads a uint64 value from a file, trimming whitespace.
-func readUintFromFile(path string) (uint64, error) {
-	data, err := os.ReadFile(path)
+func readUintFromFile(path string, fs FileReader) (uint64, error) {
+	data, err := fs.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}
@@ -363,8 +410,8 @@ func readUintFromFile(path string) (uint64, error) {
 }
 
 // readStringFromFile reads a string from a file, trimming whitespace.
-func readStringFromFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
+func readStringFromFile(path string, fs FileReader) (string, error) {
+	data, err := fs.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -372,10 +419,10 @@ func readStringFromFile(path string) (string, error) {
 }
 
 // getContainerCPULimit reads the CPU limit from cgroup files and returns it as a percentage of host cores.
-func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int) float64 {
+func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int, fs FileReader) float64 {
 	var quota, period int64
 	if cgroupVersion == CgroupV2 {
-		cpuMaxStr, _ := readStringFromFile("/sys/fs/cgroup/cpu.max")
+		cpuMaxStr, _ := readStringFromFile("/sys/fs/cgroup/cpu.max", fs)
 		parts := strings.Fields(cpuMaxStr)
 		if len(parts) == 2 {
 			if parts[0] == "max" {
@@ -385,8 +432,8 @@ func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int) float64 {
 			period, _ = strconv.ParseInt(parts[1], 10, 64)
 		}
 	} else { // CgroupV1
-		q, err1 := readUintFromFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
-		p, err2 := readUintFromFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+		q, err1 := readUintFromFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", fs)
+		p, err2 := readUintFromFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us", fs)
 		if err1 == nil && err2 == nil {
 			quota, period = int64(q), int64(p)
 		} else {
@@ -400,43 +447,40 @@ func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int) float64 {
 }
 
 // getContainerMemLimit reads the memory limit from cgroup files and returns it in bytes and GB.
-func getContainerMemLimit(cgroupVersion CgroupVersion) (int64, float64) {
+func getContainerMemLimit(cgroupVersion CgroupVersion, fs FileReader) (int64, float64) {
 	var path string
 	if cgroupVersion == CgroupV2 {
 		path = "/sys/fs/cgroup/memory.max"
 	} else {
 		path = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 	}
-
-	limitStr, err := readStringFromFile(path)
+	limitStr, err := readStringFromFile(path, fs)
 	if err != nil || limitStr == "max" {
 		return 0, 0
 	}
-
 	limitBytes, err := strconv.ParseInt(limitStr, 10, 64)
 	if err != nil || limitBytes <= 0 {
 		return 0, 0
 	}
-
 	return limitBytes, float64(limitBytes) / 1024 / 1024 / 1024
 }
 
 // updateContainerCPUUsage reads the CPU usage from the cgroup filesystem.
-func updateContainerCPUUsage(state *State) float64 {
+func updateContainerCPUUsage(state *State, fs FileReader) float64 {
 	var currentUsage uint64
 
 	if state.static.CgroupVersion == CgroupV2 {
-		statStr, _ := readStringFromFile("/sys/fs/cgroup/cpu.stat")
+		statStr, _ := readStringFromFile("/sys/fs/cgroup/cpu.stat", fs)
 		for _, line := range strings.Split(statStr, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) == 2 && parts[0] == "usage_usec" {
-				currentUsage, _ = strconv.ParseUint(parts[1], 10, 64) // value is in microseconds
+				currentUsage, _ = strconv.ParseUint(parts[1], 10, 64)
 				break
 			}
 		}
 	} else { // CgroupV1
 		// value is in nanoseconds, convert to microseconds
-		ns, err := readUintFromFile("/sys/fs/cgroup/cpuacct/cpuacct.usage")
+		ns, err := readUintFromFile("/sys/fs/cgroup/cpuacct/cpuacct.usage", fs)
 		if err == nil {
 			currentUsage = ns / 1000
 		}
@@ -464,10 +508,10 @@ func updateContainerCPUUsage(state *State) float64 {
 }
 
 // updateContainerMemUsage reads the memory usage from the cgroup filesystem.
-func updateContainerMemUsage(cgroupVersion CgroupVersion) float64 {
+func updateContainerMemUsage(cgroupVersion CgroupVersion, fs FileReader) float64 {
 	if cgroupVersion == CgroupV2 {
 		// 'anon' memory is a good proxy for non-cache process memory
-		statStr, _ := readStringFromFile("/sys/fs/cgroup/memory.stat")
+		statStr, _ := readStringFromFile("/sys/fs/cgroup/memory.stat", fs)
 		for _, line := range strings.Split(statStr, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) == 2 && parts[0] == "anon" {
@@ -478,7 +522,7 @@ func updateContainerMemUsage(cgroupVersion CgroupVersion) float64 {
 	} else { // CgroupV1
 		// memory.usage_in_bytes includes file cache, but is the standard.
 		path := "/sys/fs/cgroup/memory/memory.usage_in_bytes"
-		bytes, err := readUintFromFile(path)
+		bytes, err := readUintFromFile(path, fs)
 		if err == nil {
 			return float64(bytes) / 1024 / 1024 / 1024
 		}
@@ -487,9 +531,8 @@ func updateContainerMemUsage(cgroupVersion CgroupVersion) float64 {
 }
 
 // getStaticGPUInfo fetches total memory for each GPU.
-func getStaticGPUInfo() (int, []float64) {
-	cmdMem := exec.Command("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
-	outMem, err := cmdMem.Output()
+func getStaticGPUInfo(runner CommandRunner) (int, []float64) {
+	outMem, err := runner.Output("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
 	if err != nil {
 		return 0, nil
 	}
@@ -497,7 +540,6 @@ func getStaticGPUInfo() (int, []float64) {
 	if len(linesMem) == 0 || linesMem[0] == "" {
 		return 0, nil
 	}
-
 	totals := make([]float64, len(linesMem))
 	for i, line := range linesMem {
 		mb, _ := strconv.ParseFloat(strings.TrimSpace(line), 64)
@@ -507,12 +549,11 @@ func getStaticGPUInfo() (int, []float64) {
 }
 
 // updateLiveGPUUsage fetches current GPU utilization and memory usage.
-func updateLiveGPUUsage(gpuCount int) []GPUUsage {
+func updateLiveGPUUsage(gpuCount int, runner CommandRunner) []GPUUsage {
 	if gpuCount == 0 {
 		return nil
 	}
-	cmd := exec.Command("nvidia-smi", "--query-gpu=utilization.gpu,memory.used", "--format=csv,noheader,nounits")
-	out, err := cmd.Output()
+	out, err := runner.Output("nvidia-smi", "--query-gpu=utilization.gpu,memory.used", "--format=csv,noheader,nounits")
 	if err != nil {
 		return nil
 	}
@@ -525,59 +566,43 @@ func updateLiveGPUUsage(gpuCount int) []GPUUsage {
 		}
 		util, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
 		memUsedMB, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		usage = append(usage, GPUUsage{
-			Index: i, Utilization: util, MemUsedGB: memUsedMB / 1024,
-		})
+		usage = append(usage, GPUUsage{Index: i, Utilization: util, MemUsedGB: memUsedMB / 1024})
 	}
 	return usage
 }
 
 // getGPUProcessMap queries nvidia-smi pmon for apps running on the GPU and maps their PID to usage.
-func getGPUProcessMap() map[int32]GPUProcessInfo {
+func getGPUProcessMap(runner CommandRunner) map[int32]GPUProcessInfo {
 	// Use `pmon` with `-c 1` to get a single snapshot, and `-s um` for utilization and memory.
-	cmd := exec.Command("nvidia-smi", "pmon", "-c", "1", "-s", "um")
-	out, err := cmd.Output()
+	out, err := runner.Output("nvidia-smi", "pmon", "-c", "1", "-s", "um")
 	if err != nil {
 		return nil
 	}
-
 	processMap := make(map[int32]GPUProcessInfo)
 	lines := strings.Split(string(out), "\n")
-
 	for _, line := range lines {
-		// skip headers
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
-
 		fields := strings.Fields(line)
-		// Expecting 8 columns: gpu, pid, type, sm, mem, enc, dec, command
 		if len(fields) < 8 {
 			continue
 		}
-
-		// Fields: 0=gpu_idx, 1=pid, 3=sm_util, 4=mem_util
 		pid, err := strconv.ParseInt(fields[1], 10, 32)
 		if err != nil {
 			continue
 		}
-
 		gpuIndex, _ := strconv.Atoi(fields[0])
 		gpuUtil, _ := strconv.ParseUint(fields[3], 10, 64)
 		memUtil, _ := strconv.ParseUint(fields[4], 10, 64)
-
-		processMap[int32(pid)] = GPUProcessInfo{
-			GPUIndex:   gpuIndex,
-			GPUUtil:    gpuUtil,
-			GPUMemUtil: memUtil,
-		}
+		processMap[int32(pid)] = GPUProcessInfo{GPUIndex: gpuIndex, GPUUtil: gpuUtil, GPUMemUtil: memUtil}
 	}
 	return processMap
 }
 
 // updateProcessList fetches the current process list and adds resource usage info when possible.
-func updateProcessList(static *StaticInfo) []ProcessInfo {
-	gpuProcessMap := getGPUProcessMap()
+func updateProcessList(static *StaticInfo, runner CommandRunner) []ProcessInfo {
+	gpuProcessMap := getGPUProcessMap(runner)
 	procs, err := process.Processes()
 	if err != nil {
 		return nil
