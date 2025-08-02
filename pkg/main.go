@@ -39,6 +39,28 @@ type StaticInfo struct {
 	HostCores              int
 	GPUCount               int
 	GPUTotalGB             []float64
+	GPUUUIDMap             map[string]int
+}
+
+// GPUProcessInfo holds usage data for a process on a GPU.
+type GPUProcessInfo struct {
+	GPUIndex   int
+	UsedMemMB  uint64
+	GPUUtil    uint64
+	GPUMemUtil uint64
+}
+
+// ProcessInfo holds information for a single monitored process.
+type ProcessInfo struct {
+	PID           int32
+	User          string
+	CPUPercent    float64 // Container-relative
+	MemPercent    float64 // Container-relative
+	Command       string
+	rawCPU        float64 // Host-relative, for sorting
+	GPUIndex      int     // -1 if not on GPU
+	GPUUtil       uint64
+	GPUMemPercent float64
 }
 
 // GPUUsage holds live usage data for a single GPU.
@@ -46,16 +68,6 @@ type GPUUsage struct {
 	Index       int
 	Utilization int
 	MemUsedGB   float64
-}
-
-// ProcessInfo holds information for a single monitored process.
-type ProcessInfo struct {
-	PID        int32
-	User       string
-	CPUPercent float64 // Container-relative
-	MemPercent float64 // Container-relative
-	Command    string
-	rawCPU     float64 // Host-relative, for sorting
 }
 
 // DynamicInfo holds all the data that is refreshed on each tick.
@@ -162,9 +174,52 @@ func getStaticInfo() (StaticInfo, error) {
 	info.ContainerMemLimitBytes, info.ContainerMemLimitGB = getContainerMemLimit(info.CgroupVersion)
 
 	// Get initial GPU info
-	info.GPUCount, info.GPUTotalGB = getInitialGPUInfo()
+	info.GPUCount, info.GPUTotalGB, info.GPUUUIDMap = getStaticGPUInfo()
 
 	return info, nil
+}
+
+// getGPUProcessMap queries nvidia-smi for apps running on the GPU and maps their PID to usage.
+func getGPUProcessMap(uuidMap map[string]int) map[int32]GPUProcessInfo {
+	if len(uuidMap) == 0 {
+		return nil
+	}
+	// Query for pid, uuid, memory usage, gpu utilization, and memory utilization
+	cmd := exec.Command("nvidia-smi", "--query-compute-apps=pid,gpu_uuid,used_gpu_memory,utilization.gpu,utilization.memory", "--format=csv,noheader,nounits")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	processMap := make(map[int32]GPUProcessInfo)
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+
+	for _, line := range lines {
+		parts := strings.Split(line, ",")
+		if len(parts) != 5 {
+			continue
+		}
+
+		pid, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 32)
+		if err != nil {
+			continue
+		}
+
+		uuid := strings.TrimSpace(parts[1])
+		mem, _ := strconv.ParseUint(strings.TrimSpace(parts[2]), 10, 64)
+		gpuUtil, _ := strconv.ParseUint(strings.TrimSpace(parts[3]), 10, 64)
+		memUtil, _ := strconv.ParseUint(strings.TrimSpace(parts[4]), 10, 64)
+
+		if gpuIndex, ok := uuidMap[uuid]; ok {
+			processMap[int32(pid)] = GPUProcessInfo{
+				GPUIndex:   gpuIndex,
+				UsedMemMB:  mem,
+				GPUUtil:    gpuUtil,
+				GPUMemUtil: memUtil,
+			}
+		}
+	}
+	return processMap
 }
 
 func updateAll(state *State) {
@@ -198,93 +253,119 @@ func draw(screen tcell.Screen, state *State) {
 	y := 0
 
 	// Title
-	title := "---📊 Pod Resource & Process Monitor (press 'q' or Ctrl+C to quit)---"
+	title := "--- topic: top inside containers (press 'q' or Ctrl+C to quit) ---" // UPDATED
 	drawString(screen, 0, y, tcell.StyleDefault.Bold(true), truncateString(title, width))
 	y++
 
-	// --- Resource Panels ---
-	y = drawResourcePanels(screen, y, width, state)
-
-	// --- GPU Panel ---
-	y = drawGPUPanel(screen, y, width, height, &state.static, &state.dynamic)
+	// --- Resource Panel ---
+	y = drawResourcePanels(screen, y, width, height, state) // UPDATED
 
 	// --- Process List ---
 	if y < height {
-		drawProcessList(screen, y, width, height, &state.dynamic)
+		drawProcessList(screen, y, width, height, &state.dynamic, &state.static)
 	}
 
 	screen.Show()
 }
 
-func drawResourcePanels(s tcell.Screen, y, width int, state *State) int {
-	// CPU
+func drawResourcePanels(s tcell.Screen, y, width, height int, state *State) int {
+	barWidth := 30 // Fixed width for the usage bars
+
+	// --- CPU ---
 	cpuLimitStr := fmt.Sprintf("(limit: %.2f CPUs)", state.static.ContainerCPULimit)
 	if state.static.ContainerCPULimit == float64(state.static.HostCores) {
 		cpuLimitStr = fmt.Sprintf("(no cgroup limit, %d host cores)", state.static.HostCores)
 	}
-	cpuStr := fmt.Sprintf("CPU Usage    : %.2f%% %s", state.dynamic.ContainerCPUUsage, cpuLimitStr)
-	drawString(s, 0, y, tcell.StyleDefault, truncateString(cpuStr, width))
+	cpuText := fmt.Sprintf("CPU: %5.1f%% ", state.dynamic.ContainerCPUUsage)
+	drawString(s, 0, y, tcell.StyleDefault, cpuText)
+	drawBar(s, len(cpuText), y, barWidth, state.dynamic.ContainerCPUUsage, tcell.StyleDefault.Foreground(tcell.ColorGreen))
+	drawString(s, len(cpuText)+barWidth+1, y, tcell.StyleDefault.Dim(true), cpuLimitStr)
 	y++
 
-	// Memory
+	// --- Memory ---
 	memLimitStr := "N/A"
-	if state.static.ContainerMemLimitGB > 0 {
+	memPercent := 0.0
+	if state.static.ContainerMemLimitBytes > 0 {
 		memLimitStr = fmt.Sprintf("%.3f GB", state.static.ContainerMemLimitGB)
+		memPercent = (state.dynamic.ContainerMemUsedGB * 1024 * 1024 * 1024 / float64(state.static.ContainerMemLimitBytes)) * 100
 	}
-	memStr := fmt.Sprintf("Memory Usage : %.3f GB / %s", state.dynamic.ContainerMemUsedGB, memLimitStr)
-	drawString(s, 0, y, tcell.StyleDefault, truncateString(memStr, width))
+	memText := fmt.Sprintf("Mem: %5.1f%% ", memPercent)
+	memUsageStr := fmt.Sprintf("%.3f GB / %s", state.dynamic.ContainerMemUsedGB, memLimitStr)
+	drawString(s, 0, y, tcell.StyleDefault, memText)
+	drawBar(s, len(memText), y, barWidth, memPercent, tcell.StyleDefault.Foreground(tcell.ColorBlue))
+	drawString(s, len(memText)+barWidth+1, y, tcell.StyleDefault.Dim(true), memUsageStr)
 	y++
 
-	return y
-}
-
-func drawGPUPanel(s tcell.Screen, y, width, height int, static *StaticInfo, dynamic *DynamicInfo) int {
-	maxGPUSlots := 4
-
-	header := strings.Repeat("-", (width-6)/2) + "GPUs" + strings.Repeat("-", (width-6)/2)
-	drawString(s, 0, y, tcell.StyleDefault, truncateString(header, width))
-	y++
-
-	gpusDisplayed := 0
-	if static.GPUCount > 0 {
-		for i, gpu := range dynamic.LiveGPUUsage {
-			if y >= height || gpusDisplayed >= maxGPUSlots {
+	// --- GPUs ---
+	if state.static.GPUCount > 0 {
+		for i, gpu := range state.dynamic.LiveGPUUsage {
+			if y >= height {
 				break
 			}
-			gpuStr := fmt.Sprintf("GPU #%d: Usage: %d%%   VRAM: %.2f GB / %.2f GB",
-				gpu.Index, gpu.Utilization, gpu.MemUsedGB, static.GPUTotalGB[i])
-			drawString(s, 0, y, tcell.StyleDefault, truncateString(gpuStr, width))
+
+			// GPU Utilization
+			gpuUtilText := fmt.Sprintf("GPU%d Util: %3d%% ", i, gpu.Utilization)
+			drawString(s, 0, y, tcell.StyleDefault, gpuUtilText)
+			drawBar(s, len(gpuUtilText), y, barWidth, float64(gpu.Utilization), tcell.StyleDefault.Foreground(tcell.ColorPurple))
 			y++
-			gpusDisplayed++
-		}
-	} else if maxGPUSlots > 0 {
-		if y < height {
-			drawString(s, 0, y, tcell.StyleDefault, "No NVIDIA GPU detected")
+
+			// GPU Memory
+			gpuMemPercent := 0.0
+			if state.static.GPUTotalGB[i] > 0 {
+				gpuMemPercent = (gpu.MemUsedGB / state.static.GPUTotalGB[i]) * 100
+			}
+			gpuMemText := fmt.Sprintf("GPU%d Mem:  %3.0f%% ", i, gpuMemPercent)
+			gpuMemUsageStr := fmt.Sprintf("%.2f GB / %.2f GB", gpu.MemUsedGB, state.static.GPUTotalGB[i])
+			drawString(s, 0, y, tcell.StyleDefault, gpuMemText)
+			drawBar(s, len(gpuMemText), y, barWidth, gpuMemPercent, tcell.StyleDefault.Foreground(tcell.ColorAqua))
+			drawString(s, len(gpuMemText)+barWidth+1, y, tcell.StyleDefault.Dim(true), gpuMemUsageStr)
 			y++
-			gpusDisplayed++
 		}
 	}
-
-	// Pad with blank lines for consistent layout
-	for i := gpusDisplayed; i < maxGPUSlots; i++ {
-		if y >= height {
-			break
-		}
-		y++
-	}
-
 	return y
 }
 
-func drawProcessList(s tcell.Screen, y, width, height int, dynamic *DynamicInfo) {
-	// Column widths
-	pidW, userW, cpuW, memW := 7, 12, 6, 6
+// drawBar draws a horizontal usage bar.
+func drawBar(s tcell.Screen, x, y, width int, percent float64, style tcell.Style) {
+	if width < 2 { // Not enough space for a bar
+		return
+	}
+	barWidth := width - 2 // for [ and ]
 
-	header := fmt.Sprintf("%-*s %-*s %*s %*s %s",
-		pidW, "PID", userW, "USER", cpuW, "%CPU", memW, "%MEM", "COMMAND")
+	filledWidth := int((float64(barWidth) * percent) / 100.0)
+	if filledWidth > barWidth {
+		filledWidth = barWidth
+	}
+
+	s.SetContent(x, y, '[', nil, style)
+	for i := 0; i < barWidth; i++ {
+		if i < filledWidth {
+			s.SetContent(x+1+i, y, '█', nil, style)
+		} else {
+			s.SetContent(x+1+i, y, '─', nil, style)
+		}
+	}
+	s.SetContent(x+1+barWidth, y, ']', nil, style)
+}
+
+// drawProcessList draws the list of processes in a table format.
+func drawProcessList(s tcell.Screen, y, width, height int, dynamic *DynamicInfo, static *StaticInfo) {
+	// Define column widths
+	pidW, userW, cpuW, memW, gpuW, gpuMemW := 7, 10, 6, 6, 6, 8
+
+	// --- Draw Header ---
+	header := fmt.Sprintf("%-*s %-*s %*s %*s %*s %*s %s",
+		pidW, "PID",
+		userW, "USER",
+		cpuW, "%CPU",
+		memW, "%MEM",
+		gpuW, "%GPU",
+		gpuMemW, "%GPUMEM",
+		"COMMAND")
 	drawString(s, 0, y, tcell.StyleDefault.Reverse(true), truncateString(header, width))
 	y++
 
+	// --- Draw Process Rows ---
 	for _, p := range dynamic.Processes {
 		if y >= height {
 			break
@@ -292,15 +373,30 @@ func drawProcessList(s tcell.Screen, y, width, height int, dynamic *DynamicInfo)
 
 		userStr := truncateString(p.User, userW-1)
 
-		// Calculate available width for command
-		cmdW := width - pidW - userW - cpuW - memW - 5 // 5 for spaces
+		// Prepare GPU strings
+		gpuUtilStr := "  -"
+		gpuMemStr := "  -"
+		if p.GPUIndex != -1 {
+			gpuUtilStr = fmt.Sprintf("%2d", p.GPUUtil)
+			gpuMemStr = fmt.Sprintf("%5.1f", p.GPUMemPercent)
+		}
+
+		// Calculate available width for command string
+		cmdW := width - pidW - userW - cpuW - memW - gpuW - gpuMemW - 7 // 7 for spaces
 		if cmdW < 1 {
 			cmdW = 1
 		}
 		cmdStr := truncateString(p.Command, cmdW)
 
-		line := fmt.Sprintf("%-*d %-*s %*.1f %*.1f %s",
-			pidW, p.PID, userW, userStr, cpuW, p.CPUPercent, memW, p.MemPercent, cmdStr)
+		// Format the final line string for printing
+		line := fmt.Sprintf("%-*d %-*s %*.1f %*.1f %*s %*s %s",
+			pidW, p.PID,
+			userW, userStr,
+			cpuW, p.CPUPercent,
+			memW, p.MemPercent,
+			gpuW, gpuUtilStr,
+			gpuMemW, gpuMemStr,
+			cmdStr)
 		drawString(s, 0, y, tcell.StyleDefault, line)
 		y++
 	}
@@ -468,23 +564,44 @@ func updateContainerMemUsage(cgroupVersion CgroupVersion) float64 {
 	return 0
 }
 
-func getInitialGPUInfo() (int, []float64) {
-	cmd := exec.Command("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
-	out, err := cmd.Output()
+// getStaticGPUInfo fetches total memory for each GPU and a UUID-to-index map.
+func getStaticGPUInfo() (int, []float64, map[string]int) {
+	// Get total memory
+	cmdMem := exec.Command("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
+	outMem, err := cmdMem.Output()
 	if err != nil {
-		return 0, nil
+		return 0, nil, nil
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 || lines[0] == "" {
-		return 0, nil
+	linesMem := strings.Split(strings.TrimSpace(string(outMem)), "\n")
+	if len(linesMem) == 0 || linesMem[0] == "" {
+		return 0, nil, nil
 	}
 
-	totals := make([]float64, len(lines))
-	for i, line := range lines {
+	totals := make([]float64, len(linesMem))
+	for i, line := range linesMem {
 		mb, _ := strconv.ParseFloat(strings.TrimSpace(line), 64)
 		totals[i] = mb / 1024
 	}
-	return len(lines), totals
+
+	// Get UUID map
+	cmdUUID := exec.Command("nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader,nounits")
+	outUUID, err := cmdUUID.Output()
+	if err != nil {
+		return len(linesMem), totals, nil // Return what we have
+	}
+	linesUUID := strings.Split(strings.TrimSpace(string(outUUID)), "\n")
+	uuidMap := make(map[string]int)
+	for _, line := range linesUUID {
+		parts := strings.Split(line, ",")
+		if len(parts) != 2 {
+			continue
+		}
+		index, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+		uuid := strings.TrimSpace(parts[1])
+		uuidMap[uuid] = index
+	}
+
+	return len(linesMem), totals, uuidMap
 }
 
 func updateLiveGPUUsage(gpuCount int) []GPUUsage {
@@ -519,6 +636,7 @@ func updateLiveGPUUsage(gpuCount int) []GPUUsage {
 }
 
 func updateProcessList(static *StaticInfo) []ProcessInfo {
+	gpuProcessMap := getGPUProcessMap(static.GPUUUIDMap)
 	procs, err := process.Processes()
 	if err != nil {
 		return nil
@@ -563,14 +681,29 @@ func updateProcessList(static *StaticInfo) []ProcessInfo {
 			containerMemPercent = (float64(memInfo.RSS) / float64(static.ContainerMemLimitBytes)) * 100
 		}
 
-		processList = append(processList, ProcessInfo{
+		// Check if this process is on a GPU
+		gpuInfo, onGPU := gpuProcessMap[p.Pid]
+
+		pi := ProcessInfo{
 			PID:        p.Pid,
 			User:       user,
 			CPUPercent: containerCPUPercent,
 			MemPercent: containerMemPercent,
 			Command:    cmdline,
 			rawCPU:     cpuPercent,
-		})
+			GPUIndex:   -1, // Default to no GPU
+		}
+
+		if onGPU {
+			pi.GPUIndex = gpuInfo.GPUIndex
+			pi.GPUUtil = gpuInfo.GPUUtil
+			if static.GPUTotalGB[gpuInfo.GPUIndex] > 0 {
+				// Calculate %GPUMEM based on total memory of the specific GPU
+				pi.GPUMemPercent = (float64(gpuInfo.UsedMemMB) / (static.GPUTotalGB[gpuInfo.GPUIndex] * 1024)) * 100
+			}
+		}
+
+		processList = append(processList, pi)
 	}
 
 	// Sort by host-relative CPU usage descending
