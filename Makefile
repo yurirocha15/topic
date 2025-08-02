@@ -34,7 +34,11 @@ clean:
 
 test:
 	@echo "Running tests..."
-	(cd $(MODULE_PATH) && $(GOTEST) -v ./...)
+	(cd $(MODULE_PATH) && $(GOTEST) -coverprofile=coverage.out ./...)
+
+view-coverage:
+	@echo "==> Opening coverage report in browser..."
+	(cd $(MODULE_PATH) && go tool cover -html=coverage.out)
 
 deps:
 	@echo "Tidying dependencies..."
