@@ -1,0 +1,70 @@
+# .github/workflows/release.yml
+
+name: Build and Release
+
+# This workflow runs when a new Release is created
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for Linux (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build static binary
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          # IMPORTANT: Create a static binary for maximum compatibility (e.g., running on Alpine images).
+          CGO_ENABLED: 0
+        run: |
+          # Define the output binary name.
+          BINARY_NAME="topic-${{ env.GOOS }}-${{ env.GOARCH }}"
+          
+          # Build the Go application.
+          # -ldflags="-s -w" strips the binary to make it smaller.
+          # -X main.Version=... injects the Git tag as a version string.
+          (cd ./pkg && go build -v -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../${BINARY_NAME} .)
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: topic-linux-${{ matrix.arch }}
+          path: topic-linux-${{ matrix.arch }}
+
+  # Gather the built artifacts and attaches them to the GitHub Release.
+  release:
+    name: Create GitHub Release
+    # It only runs if the trigger was a release creation event.
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # The destination path for the downloaded artifacts.
+          path: artifacts
+
+      - name: Upload assets to release
+        uses: softprops/action-gh-release@v1
+        with:
+          # Attach all files from the 'artifacts' directory subfolders to the release.
+          files: artifacts/*/*
+        env:
+          # The GITHUB_TOKEN is automatically provided by GitHub Actions.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
