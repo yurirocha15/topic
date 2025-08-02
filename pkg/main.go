@@ -198,13 +198,6 @@ func updateInfoView(view *tview.TextView) int {
 	return strings.Count(fullText, "\n")
 }
 
-// updateHeaderView updates the header view with the navigation guide.
-func updateHeaderView(view *tview.TextView) {
-	title := "[yellow::b]topic: top inside containers"
-	guide := "[darkgrey]Quit: q, Ctrl+C  |  Navigate: ←↑→↓"
-	view.SetText(fmt.Sprintf("%s\n%s", title, guide))
-}
-
 // updateResourceView updates the current usage statistics panel.
 func updateResourceView(view *tview.TextView, state *State) int {
 	state.dynamic.mu.Lock()
