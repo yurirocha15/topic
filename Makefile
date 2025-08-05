@@ -21,7 +21,7 @@ OUTPUT_DIR=./dist
 build:
 	@echo "Building application..."
 	@mkdir -p $(OUTPUT_DIR)
-	(cd $(MODULE_PATH) && $(GOBUILD) -v -o ../$(OUTPUT_DIR)/$(BINARY_NAME) .)
+	(cd $(MODULE_PATH) && CGO_ENABLED=0 $(GOBUILD) -v -ldflags="-s -w" -o ../$(OUTPUT_DIR)/$(BINARY_NAME) .)
 
 run:
 	@echo "Running application..."
