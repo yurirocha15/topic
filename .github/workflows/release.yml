@@ -53,6 +53,8 @@ jobs:
     if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -61,7 +63,7 @@ jobs:
           path: artifacts
 
       - name: Upload assets to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           # Attach all files from the 'artifacts' directory subfolders to the release.
           files: artifacts/*/*
