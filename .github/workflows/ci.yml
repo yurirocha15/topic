@@ -28,6 +28,7 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.3
+          working-directory: ./pkg
 
       - name: Run all checks via Makefile
         run: make ci-check
