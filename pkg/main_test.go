@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -46,12 +47,12 @@ type MockStater struct {
 	FileDoesNotExist bool
 }
 
-func (ms MockStater) Stat(path string) (os.FileInfo, error) {
+func (ms MockStater) Stat(_ string) (os.FileInfo, error) {
 	if ms.FileDoesNotExist {
 		// Return an error that satisfies os.IsNotExist.
 		return nil, os.ErrNotExist
 	}
-	return nil, nil // Return nil, nil for a successful stat.
+	return os.FileInfo(nil), nil // Return nil, nil for a successful stat.
 }
 
 // --- Unit Tests ---
@@ -477,7 +478,7 @@ func TestGetStaticInfo(t *testing.T) {
 				"/sys/fs/cgroup/cpu/cpu.cfs_period_us":        "100000",
 				"/sys/fs/cgroup/memory/memory.limit_in_bytes": "4294967296",
 			}},
-			mockRunner:            MockCommandRunner{err: fmt.Errorf("nvidia-smi not found")}, // No GPU
+			mockRunner:            MockCommandRunner{err: errors.New("nvidia-smi not found")}, // No GPU
 			expectedCgroupVersion: CgroupV1,
 			expectedCPULimit:      0.5,
 			expectedGPUCount:      0,

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -17,6 +18,24 @@ import (
 	"github.com/rivo/tview"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/process"
+)
+
+// --- Constants ---
+
+const (
+	infoPanelWidth            = 55
+	placeholderHeight         = 10
+	borderHeight              = 2
+	minCPUInfoCount           = 2 // For cgroup CPU quota/period
+	minGPUUsageCount          = 2 // For nvidia-smi GPU usage
+	minGPUInfoCount           = 5 // For nvidia-smi pmon
+	waitDelta                 = 4
+	percentMultiplier         = 100.0
+	bytesPerKB                = 1024
+	bytesPerMB                = bytesPerKB * 1024
+	bytesPerGB                = bytesPerMB * 1024
+	nanosecondsToMicroseconds = 1000
+	secondToMicroseconds      = 1e6
 )
 
 // --- Interfaces ---
@@ -42,7 +61,7 @@ type CommandRunner interface {
 type OSCommandRunner struct{}
 
 func (ocr OSCommandRunner) Output(name string, arg ...string) ([]byte, error) {
-	return exec.Command(name, arg...).Output()
+	return exec.CommandContext(context.Background(), name, arg...).Output()
 }
 
 // Stater defines an interface for checking file status.
@@ -59,7 +78,7 @@ func (s OSStater) Stat(path string) (os.FileInfo, error) {
 
 // --- Data Structures ---
 
-// CgroupVersion denotes the cgroup version (1 or 2)
+// CgroupVersion denotes the cgroup version (1 or 2).
 type CgroupVersion int
 
 const (
@@ -167,16 +186,16 @@ func main() {
 	// Top panel combines resources (left) and info (right)
 	topPanel := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
-		AddItem(resourceView, 0, 1, false). // Resources take up remaining width
-		AddItem(infoView, 55, 0, false)     // Info panel has a fixed width
+		AddItem(resourceView, 0, 1, false).         // Resources take up remaining width
+		AddItem(infoView, infoPanelWidth, 0, false) // Info panel has a fixed width
 
 	topPanel.SetBorder(true).SetTitle(" System Information ")
 
 	// Main layout combines top panel and process table
 	mainLayout := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(topPanel, 10, 0, false).  // Top panel has a placeholder height, will be resized
-		AddItem(processTable, 0, 1, true) // Process table takes all remaining vertical space
+		AddItem(topPanel, placeholderHeight, 0, false). // Top panel has a placeholder height, will be resized
+		AddItem(processTable, 0, 1, true)               // Process table takes all remaining vertical space
 
 	// --- Goroutine for periodic updates ---
 	go func() {
@@ -189,8 +208,7 @@ func main() {
 				// Update all components and dynamically resize the top panel
 				leftHeight := updateResourceView(resourceView, state)
 				rightHeight := updateInfoView(infoView)
-				topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + 2 // +2 for border
-
+				topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight // +2 for border
 				mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
 				updateProcessTable(processTable, state)
 			})
@@ -208,11 +226,11 @@ func main() {
 	updateAll(state, fileReader, cmdRunner)
 	leftHeight := updateResourceView(resourceView, state)
 	rightHeight := updateInfoView(infoView)
-	topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + 2
+	topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
 	mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
 	updateProcessTable(processTable, state)
 
-	if err := app.SetRoot(mainLayout, true).Run(); err != nil {
+	if err = app.SetRoot(mainLayout, true).Run(); err != nil {
 		panic(err)
 	}
 }
@@ -249,7 +267,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 
 	// Get the available width inside the view, minus padding.
 	_, _, availableWidth, _ := view.GetInnerRect()
-	availableWidth -= 2 // Account for horizontal padding within the box
+	availableWidth -= borderHeight // Account for horizontal padding within the box
 
 	var builder strings.Builder
 
@@ -266,7 +284,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	// --- Memory ---
 	memPercent := 0.0
 	if state.static.ContainerMemLimitBytes > 0 {
-		memPercent = (state.dynamic.ContainerMemUsedGB * 1024 * 1024 * 1024 / float64(state.static.ContainerMemLimitBytes)) * 100
+		memPercent = (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
 	}
 	memLabel := fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
 	memInfo := fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB[white]", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
@@ -288,7 +306,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 			// GPU Memory
 			gpuMemPercent := 0.0
 			if state.static.GPUTotalGB[i] > 0 {
-				gpuMemPercent = (gpu.MemUsedGB / state.static.GPUTotalGB[i]) * 100
+				gpuMemPercent = (gpu.MemUsedGB / state.static.GPUTotalGB[i]) * percentMultiplier
 			}
 			gpuMemLabel := fmt.Sprintf("GPU%d Mem:  [yellow]%-3.0f%%[white] ", i, gpuMemPercent)
 			gpuMemInfo := fmt.Sprintf(" [darkcyan]%.2f GB / %.2f GB[white]", gpu.MemUsedGB, state.static.GPUTotalGB[i])
@@ -321,21 +339,28 @@ func updateProcessTable(table *tview.Table, state *State) {
 	// --- Populate Data ---
 	for r, p := range state.dynamic.Processes {
 		// PID
-		table.SetCell(r+1, 0, tview.NewTableCell(fmt.Sprintf("%d", p.PID)).SetTextColor(tcell.ColorWhite))
+		columnIdx := 0
+		table.SetCell(r+1, columnIdx, tview.NewTableCell(strconv.Itoa(int(p.PID))).SetTextColor(tcell.ColorWhite))
 		// USER
-		table.SetCell(r+1, 1, tview.NewTableCell(p.User).SetTextColor(tcell.ColorGreen))
+		columnIdx++
+		table.SetCell(r+1, columnIdx, tview.NewTableCell(p.User).SetTextColor(tcell.ColorGreen))
 		// %CPU
-		table.SetCell(r+1, 2, tview.NewTableCell(fmt.Sprintf("%.1f", p.CPUPercent)).SetTextColor(tcell.ColorAqua))
+		columnIdx++
+		table.SetCell(r+1, columnIdx, tview.NewTableCell(strconv.FormatFloat(p.CPUPercent, 'f', 1, 64)).SetTextColor(tcell.ColorAqua))
 		// %MEM
-		table.SetCell(r+1, 3, tview.NewTableCell(fmt.Sprintf("%.1f", p.MemPercent)).SetTextColor(tcell.ColorAqua))
+		columnIdx++
+		table.SetCell(r+1, columnIdx, tview.NewTableCell(strconv.FormatFloat(p.MemPercent, 'f', 1, 64)).SetTextColor(tcell.ColorAqua))
 
 		// %GPU and %GPUMEM
+		columnIdx++
 		if p.GPUIndex != -1 {
-			table.SetCell(r+1, 4, tview.NewTableCell(fmt.Sprintf("%d", p.GPUUtil)).SetTextColor(tcell.ColorFuchsia))
-			table.SetCell(r+1, 5, tview.NewTableCell(fmt.Sprintf("%.1f", p.GPUMemPercent)).SetTextColor(tcell.ColorFuchsia))
+			table.SetCell(r+1, columnIdx, tview.NewTableCell(strconv.FormatUint(p.GPUUtil, 10)).SetTextColor(tcell.ColorFuchsia))
+			columnIdx++
+			table.SetCell(r+1, columnIdx, tview.NewTableCell(strconv.FormatFloat(p.GPUMemPercent, 'f', 1, 64)).SetTextColor(tcell.ColorFuchsia))
 		} else {
-			table.SetCell(r+1, 4, tview.NewTableCell("-").SetTextColor(tcell.ColorDarkGray))
-			table.SetCell(r+1, 5, tview.NewTableCell("-").SetTextColor(tcell.ColorDarkGray))
+			table.SetCell(r+1, columnIdx, tview.NewTableCell("-").SetTextColor(tcell.ColorDarkGray))
+			columnIdx++
+			table.SetCell(r+1, columnIdx, tview.NewTableCell("-").SetTextColor(tcell.ColorDarkGray))
 		}
 
 		// COMMAND
@@ -343,7 +368,8 @@ func updateProcessTable(table *tview.Table, state *State) {
 			SetTextColor(tcell.ColorWhite).
 			SetExpansion(1).
 			SetMaxWidth(0) // Prevent truncation
-		table.SetCell(r+1, 6, cmdCell)
+		columnIdx++
+		table.SetCell(r+1, columnIdx, cmdCell)
 	}
 }
 
@@ -354,7 +380,7 @@ func makeBar(percent float64, barWidth int) string {
 		barWidth = 0
 	}
 
-	filledWidth := int((float64(barWidth) * percent) / 100.0)
+	filledWidth := int((float64(barWidth) * percent) / percentMultiplier)
 	if filledWidth > barWidth {
 		filledWidth = barWidth
 	}
@@ -373,7 +399,7 @@ func updateAll(state *State, fs FileReader, runner CommandRunner) {
 	state.dynamic.mu.Lock()
 	defer state.dynamic.mu.Unlock()
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(waitDelta)
 	go func() { defer wg.Done(); state.dynamic.ContainerCPUUsage = updateContainerCPUUsage(state, fs) }()
 	go func() {
 		defer wg.Done()
@@ -391,7 +417,7 @@ func updateAll(state *State, fs FileReader, runner CommandRunner) {
 func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticInfo, error) {
 	var info StaticInfo
 	var err error
-	if _, err := stater.Stat("/sys/fs/cgroup/cpu.max"); os.IsNotExist(err) {
+	if _, err = stater.Stat("/sys/fs/cgroup/cpu.max"); os.IsNotExist(err) {
 		info.CgroupVersion = CgroupV1
 	} else {
 		info.CgroupVersion = CgroupV2
@@ -403,7 +429,7 @@ func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticIn
 	info.ContainerCPULimit = getContainerCPULimit(info.CgroupVersion, info.HostCores, fs)
 	info.ContainerMemLimitBytes, info.ContainerMemLimitGB = getContainerMemLimit(info.CgroupVersion, fs)
 	info.GPUCount, info.GPUTotalGB = getStaticGPUInfo(runner)
-	return info, nil
+	return info, err
 }
 
 // readUintFromFile reads a uint64 value from a file, trimming whitespace.
@@ -430,22 +456,22 @@ func readStringFromFile(path string, fs FileReader) (string, error) {
 
 // getContainerCPULimit reads the CPU limit from cgroup files and returns it as a percentage of host cores.
 func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int, fs FileReader) float64 {
-	var quota, period int64
+	var quota, period uint64
 	if cgroupVersion == CgroupV2 {
 		cpuMaxStr, _ := readStringFromFile("/sys/fs/cgroup/cpu.max", fs)
 		parts := strings.Fields(cpuMaxStr)
-		if len(parts) == 2 {
+		if len(parts) == minCPUInfoCount {
 			if parts[0] == "max" {
 				return float64(hostCores)
 			}
-			quota, _ = strconv.ParseInt(parts[0], 10, 64)
-			period, _ = strconv.ParseInt(parts[1], 10, 64)
+			quota, _ = strconv.ParseUint(parts[0], 10, 64)
+			period, _ = strconv.ParseUint(parts[1], 10, 64)
 		}
 	} else { // CgroupV1
 		q, err1 := readUintFromFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", fs)
 		p, err2 := readUintFromFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us", fs)
 		if err1 == nil && err2 == nil {
-			quota, period = int64(q), int64(p)
+			quota, period = q, p
 		} else {
 			return float64(hostCores)
 		}
@@ -472,7 +498,7 @@ func getContainerMemLimit(cgroupVersion CgroupVersion, fs FileReader) (int64, fl
 	if err != nil || limitBytes <= 0 {
 		return 0, 0
 	}
-	return limitBytes, float64(limitBytes) / 1024 / 1024 / 1024
+	return limitBytes, float64(limitBytes) / float64(bytesPerGB)
 }
 
 // updateContainerCPUUsage reads the CPU usage from the cgroup filesystem.
@@ -492,7 +518,7 @@ func updateContainerCPUUsage(state *State, fs FileReader) float64 {
 		// value is in nanoseconds, convert to microseconds
 		ns, err := readUintFromFile("/sys/fs/cgroup/cpuacct/cpuacct.usage", fs)
 		if err == nil {
-			currentUsage = ns / 1000
+			currentUsage = ns / nanosecondsToMicroseconds
 		}
 	}
 
@@ -505,14 +531,14 @@ func updateContainerCPUUsage(state *State, fs FileReader) float64 {
 		// usageDelta is how many microseconds of CPU time were used.
 		// timeDelta * 1e6 is how many microseconds passed in wall-clock time.
 		// Normalize by the number of cores to get a percentage of the container's total capacity.
-		cpuPercent = (usageDelta / (timeDelta * 1e6)) * 100 / state.static.ContainerCPULimit
+		cpuPercent = (usageDelta / (timeDelta * secondToMicroseconds)) * percentMultiplier / state.static.ContainerCPULimit
 	}
 
 	state.prevCPUUsage = currentUsage
 	state.prevCPUTime = now
 
-	if cpuPercent > 100.0 {
-		return 100.0
+	if cpuPercent > percentMultiplier {
+		return percentMultiplier
 	}
 	return cpuPercent
 }
@@ -526,7 +552,7 @@ func updateContainerMemUsage(cgroupVersion CgroupVersion, fs FileReader) float64
 			parts := strings.Fields(line)
 			if len(parts) == 2 && parts[0] == "anon" {
 				bytes, _ := strconv.ParseUint(parts[1], 10, 64)
-				return float64(bytes) / 1024 / 1024 / 1024
+				return float64(bytes) / float64(bytesPerGB)
 			}
 		}
 	} else { // CgroupV1
@@ -534,7 +560,7 @@ func updateContainerMemUsage(cgroupVersion CgroupVersion, fs FileReader) float64
 		path := "/sys/fs/cgroup/memory/memory.usage_in_bytes"
 		bytes, err := readUintFromFile(path, fs)
 		if err == nil {
-			return float64(bytes) / 1024 / 1024 / 1024
+			return float64(bytes) / float64(bytesPerGB)
 		}
 	}
 	return 0
@@ -553,7 +579,7 @@ func getStaticGPUInfo(runner CommandRunner) (int, []float64) {
 	totals := make([]float64, len(linesMem))
 	for i, line := range linesMem {
 		mb, _ := strconv.ParseFloat(strings.TrimSpace(line), 64)
-		totals[i] = mb / 1024
+		totals[i] = mb / bytesPerKB // Convert MB to GB
 	}
 	return len(linesMem), totals
 }
@@ -571,12 +597,12 @@ func updateLiveGPUUsage(gpuCount int, runner CommandRunner) []GPUUsage {
 	usage := make([]GPUUsage, 0, len(lines))
 	for i, line := range lines {
 		parts := strings.Split(line, ",")
-		if len(parts) != 2 {
+		if len(parts) != minGPUUsageCount {
 			continue
 		}
 		util, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
 		memUsedMB, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		usage = append(usage, GPUUsage{Index: i, Utilization: util, MemUsedGB: memUsedMB / 1024})
+		usage = append(usage, GPUUsage{Index: i, Utilization: util, MemUsedGB: memUsedMB / bytesPerKB})
 	}
 	return usage
 }
@@ -595,10 +621,11 @@ func getGPUProcessMap(runner CommandRunner) map[int32]GPUProcessInfo {
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 8 {
+		if len(fields) < minGPUInfoCount {
 			continue
 		}
-		pid, err := strconv.ParseInt(fields[1], 10, 32)
+		var pid int64
+		pid, err = strconv.ParseInt(fields[1], 10, 32)
 		if err != nil {
 			continue
 		}
@@ -619,21 +646,26 @@ func updateProcessList(static *StaticInfo, runner CommandRunner) []ProcessInfo {
 	}
 	var processList []ProcessInfo
 	for _, p := range procs {
-		cpuPercent, err := p.CPUPercent()
+		var cpuPercent float64
+		cpuPercent, err = p.CPUPercent()
 		if err != nil {
 			continue
 		}
-		memInfo, err := p.MemoryInfo()
+		var memInfo *process.MemoryInfoStat
+		memInfo, err = p.MemoryInfo()
 		if err != nil {
 			continue
 		}
-		user, err := p.Username()
+		var user string
+		user, err = p.Username()
 		if err != nil {
 			user = "n/a"
 		}
-		cmdline, err := p.Cmdline()
+		var cmdline string
+		cmdline, err = p.Cmdline()
 		if err != nil || cmdline == "" {
-			name, err := p.Name()
+			var name string
+			name, err = p.Name()
 			if err != nil {
 				continue
 			}
@@ -645,7 +677,7 @@ func updateProcessList(static *StaticInfo, runner CommandRunner) []ProcessInfo {
 		}
 		containerMemPercent := 0.0
 		if static.ContainerMemLimitBytes > 0 {
-			containerMemPercent = (float64(memInfo.RSS) / float64(static.ContainerMemLimitBytes)) * 100
+			containerMemPercent = (float64(memInfo.RSS) / float64(static.ContainerMemLimitBytes)) * percentMultiplier
 		}
 		gpuInfo, onGPU := gpuProcessMap[p.Pid]
 
