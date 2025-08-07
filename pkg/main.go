@@ -208,7 +208,7 @@ func main() {
 				// Update all components and dynamically resize the top panel
 				leftHeight := updateResourceView(resourceView, state)
 				rightHeight := updateInfoView(infoView)
-				topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight // +2 for border
+				topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
 				mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
 				updateProcessTable(processTable, state)
 			})

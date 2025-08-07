@@ -137,8 +137,10 @@ func TestGetContainerMemLimit(t *testing.T) {
 		{
 			name:          "CgroupV1 with huge limit (over int64 max)",
 			cgroupVersion: CgroupV1,
-			mockFiles:     map[string]string{"/sys/fs/cgroup/memory/memory.limit_in_bytes": "9223372036854775808"}, // Larger than int64
-			expectedBytes: 0,                                                                                       // Should fail parsing and return 0
+			// Larger than int64
+			mockFiles: map[string]string{"/sys/fs/cgroup/memory/memory.limit_in_bytes": "9223372036854775808"},
+			// Should fail parsing and return 0
+			expectedBytes: 0,
 			expectedGB:    0.0,
 		},
 		{

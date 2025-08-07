@@ -1,12 +1,7 @@
 #!/bin/sh
 #
-# This script downloads and installs the latest release of 'topic' for your system.
-# It is POSIX-compliant and should run on any system with sh.
-#
-# Usage: curl -s ... | sh   OR   wget -qO- ... | sh
-#
-
-# Use 'set -e' to exit on any error.
+# This script downloads and installs the latest release of 'topic'.
+# It supports both x86_64 (amd64) and arm64 architectures.
 set -e
 
 # --- Configuration ---
@@ -15,7 +10,7 @@ BINARY_NAME="topic"
 PRIMARY_INSTALL_DIR="/usr/local/bin"
 FALLBACK_INSTALL_DIR="$HOME/.local/bin"
 
-# --- Helper Functions (using printf for POSIX compliance) ---
+# --- Helper Functions ---
 info() {
     printf '\033[32m[INFO]\033[0m %s\n' "$1"
 }
