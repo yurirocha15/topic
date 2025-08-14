@@ -3,7 +3,7 @@ GOCMD=go
 GOBUILD=go build
 GOCLEAN=go clean
 GOLINT=golangci-lint run
-GOFMT=go fmt
+GOFMT=gofmt
 GOTEST=go test
 GOMOD=go mod
 GORUN=go run
@@ -47,7 +47,7 @@ deps:
 
 format:
 	@echo "Formatting code..."
-	(cd $(MODULE_PATH) && $(GOFMT) ./...)
+	(cd $(MODULE_PATH) && $(GOFMT) -s -w ./)
 
 lint:
 	@echo "Linting code..."
