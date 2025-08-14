@@ -37,6 +37,8 @@ const (
 	bytesPerGB                = bytesPerMB * 1024
 	nanosecondsToMicroseconds = 1000
 	secondToMicroseconds      = 1e6
+	minBarWidth               = 20 // Minimum width for a progress bar
+	columnSpacing             = 5  // Spacing between columns
 )
 
 // --- Interfaces ---
@@ -119,6 +121,20 @@ type StorageUsage struct {
 	UsedGB      float64 // Used space in GB
 	FreeGB      float64 // Free space in GB
 	UsedPercent float64 // Usage percentage
+}
+
+// BarLayout holds information about how bars should be arranged.
+type BarLayout struct {
+	Columns     int // Number of columns
+	BarWidth    int // Width of each bar
+	TotalWidth  int // Total width used
+}
+
+// BarData holds information for rendering a single bar.
+type BarData struct {
+	Label   string  // Left side label
+	Percent float64 // Percentage for the bar
+	Info    string  // Right side info text
 }
 
 // GPUProcessInfo holds usage data for a process on a GPU.
@@ -315,40 +331,92 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	// --- Storage ---
 	if len(state.dynamic.StorageUsage) > 0 {
 		builder.WriteString("\n")
+		
+		// Collect storage bars data
+		var storageBars []BarData
 		for _, storage := range state.dynamic.StorageUsage {
 			// Shorten long mount paths for display
 			displayPath := storage.Path
 			if len(displayPath) > 15 {
 				displayPath = "..." + displayPath[len(displayPath)-12:]
 			}
-
-			storageLabel := fmt.Sprintf("DISK %s: [yellow]%-6.1f%%[white] ", displayPath, storage.UsedPercent)
-			storageInfo := fmt.Sprintf(" [darkcyan]%.2f GB / %.2f GB[white]",
-				storage.UsedGB,
-				storage.UsedGB+storage.FreeGB)
-			storageBarWidth := availableWidth - tview.TaggedStringWidth(storageLabel) - tview.TaggedStringWidth(storageInfo)
-			builder.WriteString(storageLabel + makeBar(storage.UsedPercent, storageBarWidth) + storageInfo + "\n")
+			
+			storageBars = append(storageBars, BarData{
+				Label:   fmt.Sprintf("DISK %s: [yellow]%-6.1f%%[white]", displayPath, storage.UsedPercent),
+				Percent: storage.UsedPercent,
+				Info:    fmt.Sprintf("[darkcyan]%.2f GB / %.2f GB[white]", storage.UsedGB, storage.UsedGB+storage.FreeGB),
+			})
+		}
+		
+		// Calculate layout for storage bars
+		storageLayout := calculateBarLayout(availableWidth, len(storageBars))
+		
+		// Render storage bars using multi-column layout
+		if storageLayout.Columns == 1 {
+			// Single column - render with labels and info
+			for _, bar := range storageBars {
+				labelInfoWidth := tview.TaggedStringWidth(bar.Label) + tview.TaggedStringWidth(" " + bar.Info)
+				barWidth := availableWidth - labelInfoWidth
+				if barWidth < minBarWidth {
+					barWidth = minBarWidth
+				}
+				builder.WriteString(bar.Label + " " + makeBar(bar.Percent, barWidth) + " " + bar.Info + "\n")
+			}
+		} else {
+			// Multi-column layout - render complete bars side by side with proper alignment
+			barRows := makeAlignedMultiColumnBars(storageBars, storageLayout)
+			for _, row := range barRows {
+				builder.WriteString(row + "\n")
+			}
 		}
 	}
 
 	// --- GPUs ---
 	if state.static.GPUCount > 0 {
 		builder.WriteString("\n")
+		
+		// Collect GPU bars data
+		var gpuBars []BarData
 		for i, gpu := range state.dynamic.LiveGPUUsage {
 			// GPU Utilization
-			gpuUtilLabel := fmt.Sprintf("GPU%d Util: [yellow]%-3d%%[white] ", i, gpu.Utilization)
-			gpuUtilBarWidth := availableWidth - tview.TaggedStringWidth(gpuUtilLabel)
-			builder.WriteString(gpuUtilLabel + makeBar(float64(gpu.Utilization), gpuUtilBarWidth) + "\n")
-
+			gpuBars = append(gpuBars, BarData{
+				Label:   fmt.Sprintf("GPU%d Util: [yellow]%-3d%%[white]", i, gpu.Utilization),
+				Percent: float64(gpu.Utilization),
+				Info:    "",
+			})
+			
 			// GPU Memory
 			gpuMemPercent := 0.0
 			if state.static.GPUTotalGB[i] > 0 {
 				gpuMemPercent = (gpu.MemUsedGB / state.static.GPUTotalGB[i]) * percentMultiplier
 			}
-			gpuMemLabel := fmt.Sprintf("GPU%d Mem:  [yellow]%-3.0f%%[white] ", i, gpuMemPercent)
-			gpuMemInfo := fmt.Sprintf(" [darkcyan]%.2f GB / %.2f GB[white]", gpu.MemUsedGB, state.static.GPUTotalGB[i])
-			gpuMemBarWidth := availableWidth - tview.TaggedStringWidth(gpuMemLabel) - tview.TaggedStringWidth(gpuMemInfo)
-			builder.WriteString(gpuMemLabel + makeBar(gpuMemPercent, gpuMemBarWidth) + gpuMemInfo + "\n")
+			gpuBars = append(gpuBars, BarData{
+				Label:   fmt.Sprintf("GPU%d Mem:  [yellow]%-3.0f%%[white]", i, gpuMemPercent),
+				Percent: gpuMemPercent,
+				Info:    fmt.Sprintf("[darkcyan]%.2f GB / %.2f GB[white]", gpu.MemUsedGB, state.static.GPUTotalGB[i]),
+			})
+		}
+		
+		// Calculate layout for GPU bars (limited to 1-2 columns)
+		gpuLayout := calculateGPUBarLayout(availableWidth, len(gpuBars))
+		
+		// Render GPU bars using multi-column layout
+		if gpuLayout.Columns == 1 {
+			// Single column - render with labels and info
+			for _, bar := range gpuBars {
+				labelInfoWidth := tview.TaggedStringWidth(bar.Label) + tview.TaggedStringWidth(" " + bar.Info)
+				barWidth := availableWidth - labelInfoWidth
+				if barWidth < minBarWidth {
+					barWidth = minBarWidth
+				}
+				builder.WriteString(bar.Label + " " + makeBar(bar.Percent, barWidth) + " " + bar.Info + "\n")
+			}
+		} else {
+			// Multi-column layout - render complete bars side by side with proper alignment
+			barRows := makeAlignedMultiColumnBars(gpuBars, gpuLayout)
+			for _, row := range barRows {
+				builder.WriteString(row + "\n")
+			}
 		}
 	}
 
@@ -410,6 +478,216 @@ func updateProcessTable(table *tview.Table, state *State) {
 	}
 }
 
+// calculateBarLayout determines the optimal column arrangement for bars.
+func calculateBarLayout(availableWidth, numBars int) BarLayout {
+	if availableWidth < minBarWidth || numBars <= 0 {
+		return BarLayout{Columns: 1, BarWidth: minBarWidth, TotalWidth: minBarWidth}
+	}
+
+	// Estimate space needed for text per bar
+	// Labels are typically around 20-25 chars, info text around 20-25 chars
+	estimatedTextWidth := 50 // Conservative estimate for label + info + spacing
+	
+	// Try different numbers of columns, starting from the maximum possible
+	maxColumns := numBars
+	if maxColumns > 4 { // Practical limit for readability
+		maxColumns = 4
+	}
+
+	for columns := maxColumns; columns >= 1; columns-- {
+		// Calculate space needed for spacing between columns
+		spacingWidth := (columns - 1) * columnSpacing
+		
+		// Calculate available width per column
+		availableWidthPerColumn := (availableWidth - spacingWidth) / columns
+		
+		// Each column needs space for text + bar
+		barWidth := availableWidthPerColumn - estimatedTextWidth
+		
+		if barWidth >= minBarWidth {
+			totalUsedWidth := columns*(barWidth+estimatedTextWidth) + spacingWidth
+			return BarLayout{
+				Columns:    columns,
+				BarWidth:   barWidth,
+				TotalWidth: totalUsedWidth,
+			}
+		}
+	}
+
+	// Fallback to single column with minimum width
+	return BarLayout{Columns: 1, BarWidth: minBarWidth, TotalWidth: minBarWidth}
+}
+
+// calculateGPUBarLayout determines the optimal column arrangement for GPU bars (max 2 columns).
+func calculateGPUBarLayout(availableWidth, numBars int) BarLayout {
+	if availableWidth < minBarWidth || numBars <= 0 {
+		return BarLayout{Columns: 1, BarWidth: minBarWidth, TotalWidth: minBarWidth}
+	}
+
+	// Estimate space needed for text per bar (GPU bars have shorter text)
+	estimatedTextWidth := 40 // GPU labels are shorter
+	
+	// GPU bars are limited to 1 or 2 columns for better readability
+	maxColumns := 2
+	if numBars == 1 {
+		maxColumns = 1
+	}
+
+	for columns := maxColumns; columns >= 1; columns-- {
+		// Calculate space needed for spacing between columns
+		spacingWidth := (columns - 1) * columnSpacing
+		
+		// Calculate available width per column
+		availableWidthPerColumn := (availableWidth - spacingWidth) / columns
+		
+		// Each column needs space for text + bar
+		barWidth := availableWidthPerColumn - estimatedTextWidth
+		
+		if barWidth >= minBarWidth {
+			totalUsedWidth := columns*(barWidth+estimatedTextWidth) + spacingWidth
+			return BarLayout{
+				Columns:    columns,
+				BarWidth:   barWidth,
+				TotalWidth: totalUsedWidth,
+			}
+		}
+	}
+
+	// Fallback to single column with minimum width
+	return BarLayout{Columns: 1, BarWidth: minBarWidth, TotalWidth: minBarWidth}
+}
+
+// makeAlignedMultiColumnBars creates properly aligned bars in columns with consistent spacing.
+func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
+	if len(bars) == 0 {
+		return nil
+	}
+
+	var result []string
+	numRows := (len(bars) + layout.Columns - 1) / layout.Columns
+
+	// Calculate the maximum width needed for each column component
+	maxLabelWidth := 0
+	maxInfoWidth := 0
+	
+	for _, bar := range bars {
+		labelWidth := tview.TaggedStringWidth(bar.Label)
+		if labelWidth > maxLabelWidth {
+			maxLabelWidth = labelWidth
+		}
+		
+		infoWidth := tview.TaggedStringWidth(bar.Info)
+		if infoWidth > maxInfoWidth {
+			maxInfoWidth = infoWidth
+		}
+	}
+
+	for row := 0; row < numRows; row++ {
+		var completeBars []string
+		
+		for col := 0; col < layout.Columns; col++ {
+			barIndex := row*layout.Columns + col
+			if barIndex >= len(bars) {
+				// Fill empty columns with spaces
+				emptyWidth := maxLabelWidth + 1 + layout.BarWidth + 1 + maxInfoWidth
+				completeBars = append(completeBars, strings.Repeat(" ", emptyWidth))
+				continue
+			}
+			
+			bar := bars[barIndex]
+			
+			// Pad label to consistent width
+			paddedLabel := bar.Label
+			labelPadding := maxLabelWidth - tview.TaggedStringWidth(bar.Label)
+			if labelPadding > 0 {
+				paddedLabel += strings.Repeat(" ", labelPadding)
+			}
+			
+			// Create the bar
+			barContent := makeBar(bar.Percent, layout.BarWidth)
+			
+			// Pad info to consistent width (if info exists)
+			var paddedInfo string
+			if bar.Info != "" {
+				paddedInfo = bar.Info
+				infoPadding := maxInfoWidth - tview.TaggedStringWidth(bar.Info)
+				if infoPadding > 0 {
+					paddedInfo += strings.Repeat(" ", infoPadding)
+				}
+				
+				// Complete bar: label + space + bar + space + info
+				completeLine := paddedLabel + " " + barContent + " " + paddedInfo
+				completeBars = append(completeBars, completeLine)
+			} else {
+				// No info, just label + bar
+				completeLine := paddedLabel + " " + barContent
+				completeBars = append(completeBars, completeLine)
+			}
+		}
+		
+		// Join columns with spacing
+		result = append(result, strings.Join(completeBars, strings.Repeat(" ", columnSpacing)))
+	}
+
+	return result
+}
+
+// makeMultiColumnBars creates bars arranged in columns with proper spacing.
+func makeMultiColumnBars(bars []BarData, layout BarLayout) []string {
+	if len(bars) == 0 {
+		return nil
+	}
+
+	var result []string
+	numRows := (len(bars) + layout.Columns - 1) / layout.Columns // Ceiling division
+
+	for row := 0; row < numRows; row++ {
+		var rowParts []string
+		
+		for col := 0; col < layout.Columns; col++ {
+			barIndex := row*layout.Columns + col
+			if barIndex >= len(bars) {
+				// Fill empty columns with spaces
+				emptySpace := strings.Repeat(" ", layout.BarWidth)
+				rowParts = append(rowParts, emptySpace)
+				continue
+			}
+			
+			bar := bars[barIndex]
+			
+			// Create the bar without label and info (those will be on separate lines)
+			barContent := makeBar(bar.Percent, layout.BarWidth)
+			rowParts = append(rowParts, barContent)
+		}
+		
+		// Join columns with spacing
+		rowLine := strings.Join(rowParts, strings.Repeat(" ", columnSpacing))
+		result = append(result, rowLine)
+	}
+
+	return result
+}
+
+// makeBarWithSeparation creates a visual bar with vertical separation characters.
+func makeBarWithSeparation(percent float64, barWidth int) string {
+	// Ensure barWidth is not negative.
+	if barWidth < 0 {
+		barWidth = 0
+	}
+
+	filledWidth := int((float64(barWidth) * percent) / percentMultiplier)
+	if filledWidth > barWidth {
+		filledWidth = barWidth
+	}
+	if filledWidth < 0 {
+		filledWidth = 0
+	}
+
+	// Use different characters to create visual separation
+	bar := strings.Repeat("▓", filledWidth) + strings.Repeat("░", barWidth-filledWidth)
+	return fmt.Sprintf("[green]%s[white]", bar)
+}
+
 // makeBar creates a visual bar representation of a percentage.
 func makeBar(percent float64, barWidth int) string {
 	// Ensure barWidth is not negative.
@@ -425,7 +703,8 @@ func makeBar(percent float64, barWidth int) string {
 		filledWidth = 0
 	}
 
-	bar := strings.Repeat("█", filledWidth) + strings.Repeat("─", barWidth-filledWidth)
+	// Use characters that provide better visual separation between bars
+	bar := strings.Repeat("▓", filledWidth) + strings.Repeat("░", barWidth-filledWidth)
 	return fmt.Sprintf("[green]%s[white]", bar)
 }
 

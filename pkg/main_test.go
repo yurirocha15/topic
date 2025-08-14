@@ -65,11 +65,11 @@ func TestMakeBar(t *testing.T) {
 		width    int
 		expected string
 	}{
-		{name: "Zero Percent (width 20)", percent: 0, width: 20, expected: "[green]────────────────────[white]"},
-		{name: "50 Percent (width 20)", percent: 50, width: 20, expected: "[green]██████████──────────[white]"},
-		{name: "100 Percent (width 20)", percent: 100, width: 20, expected: "[green]████████████████████[white]"},
-		{name: "50 Percent (width 10)", percent: 50, width: 10, expected: "[green]█████─────[white]"},
-		{name: "75 Percent (width 10)", percent: 75, width: 10, expected: "[green]███████───[white]"},
+		{name: "Zero Percent (width 20)", percent: 0, width: 20, expected: "[green]░░░░░░░░░░░░░░░░░░░░[white]"},
+		{name: "50 Percent (width 20)", percent: 50, width: 20, expected: "[green]▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░[white]"},
+		{name: "100 Percent (width 20)", percent: 100, width: 20, expected: "[green]▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓[white]"},
+		{name: "50 Percent (width 10)", percent: 50, width: 10, expected: "[green]▓▓▓▓▓░░░░░[white]"},
+		{name: "75 Percent (width 10)", percent: 75, width: 10, expected: "[green]▓▓▓▓▓▓▓░░░[white]"},
 		{name: "Zero width", percent: 100, width: 0, expected: "[green][white]"},
 		{name: "Negative width", percent: 100, width: -5, expected: "[green][white]"},
 	}
@@ -612,6 +612,129 @@ func TestShouldSkipFilesystem(t *testing.T) {
 			if result != tc.expected {
 				t.Errorf("shouldSkipFilesystem(%q, %q) = %v, expected %v",
 					tc.fstype, tc.mountpoint, result, tc.expected)
+			}
+		})
+	}
+}
+
+// TestCalculateBarLayout tests the dynamic bar layout calculation.
+func TestCalculateBarLayout(t *testing.T) {
+	testCases := []struct {
+		name           string
+		availableWidth int
+		numBars        int
+		expectedCols   int
+		expectedWidth  int
+	}{
+		{name: "Wide space, single bar", availableWidth: 150, numBars: 1, expectedCols: 1, expectedWidth: 100},  // 150 - 50 = 100
+		{name: "Space for two columns", availableWidth: 150, numBars: 2, expectedCols: 2, expectedWidth: 22},   // (150-5)/2 - 50 = 22.5 -> 22
+		{name: "Narrow space, force single column", availableWidth: 80, numBars: 3, expectedCols: 1, expectedWidth: 30}, // 80 - 50 = 30
+		{name: "Exact minimum width", availableWidth: 70, numBars: 1, expectedCols: 1, expectedWidth: 20},      // 70 - 50 = 20
+		{name: "Below minimum width", availableWidth: 15, numBars: 1, expectedCols: 1, expectedWidth: 20},      // Should fallback to minBarWidth
+		{name: "No bars", availableWidth: 100, numBars: 0, expectedCols: 1, expectedWidth: 20},                 // Should fallback
+		{name: "Space for three columns", availableWidth: 230, numBars: 3, expectedCols: 3, expectedWidth: 23}, // (230-10)/3 - 50 = 23.33 -> 23
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			layout := calculateBarLayout(tc.availableWidth, tc.numBars)
+			if layout.Columns != tc.expectedCols {
+				t.Errorf("Expected %d columns, got %d", tc.expectedCols, layout.Columns)
+			}
+			if layout.BarWidth != tc.expectedWidth {
+				t.Errorf("Expected bar width %d, got %d", tc.expectedWidth, layout.BarWidth)
+			}
+		})
+	}
+}
+
+// TestMakeMultiColumnBars tests the multi-column bar rendering.
+func TestMakeMultiColumnBars(t *testing.T) {
+	testCases := []struct {
+		name         string
+		bars         []BarData
+		layout       BarLayout
+		expectedRows int
+	}{
+		{
+			name: "Single bar, single column",
+			bars: []BarData{{Label: "Test", Percent: 50, Info: ""}},
+			layout: BarLayout{Columns: 1, BarWidth: 20, TotalWidth: 20},
+			expectedRows: 1,
+		},
+		{
+			name: "Two bars, two columns", 
+			bars: []BarData{
+				{Label: "Test1", Percent: 50, Info: ""},
+				{Label: "Test2", Percent: 75, Info: ""},
+			},
+			layout: BarLayout{Columns: 2, BarWidth: 20, TotalWidth: 45},
+			expectedRows: 1,
+		},
+		{
+			name: "Three bars, two columns",
+			bars: []BarData{
+				{Label: "Test1", Percent: 50, Info: ""},
+				{Label: "Test2", Percent: 75, Info: ""},
+				{Label: "Test3", Percent: 25, Info: ""},
+			},
+			layout: BarLayout{Columns: 2, BarWidth: 20, TotalWidth: 45},
+			expectedRows: 2,
+		},
+		{
+			name: "Empty bars",
+			bars: []BarData{},
+			layout: BarLayout{Columns: 1, BarWidth: 20, TotalWidth: 20},
+			expectedRows: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := makeMultiColumnBars(tc.bars, tc.layout)
+			if len(result) != tc.expectedRows {
+				t.Errorf("Expected %d rows, got %d", tc.expectedRows, len(result))
+			}
+			
+			// Verify each row has the expected structure
+			for i, row := range result {
+				// Strip color tags for length checking
+				cleanRow := strings.Replace(row, "[green]", "", -1)
+				cleanRow = strings.Replace(cleanRow, "[white]", "", -1)
+				
+				// Should contain bar characters
+				if tc.expectedRows > 0 && !strings.ContainsAny(cleanRow, "▓░") {
+					t.Errorf("Row %d should contain bar characters, got: %s", i, cleanRow)
+				}
+			}
+		})
+	}
+}
+
+// TestCalculateGPUBarLayout tests the GPU-specific bar layout calculation with column limits.
+func TestCalculateGPUBarLayout(t *testing.T) {
+	testCases := []struct {
+		name           string
+		availableWidth int
+		numBars        int
+		expectedCols   int
+		expectedWidth  int
+	}{
+		{name: "Single GPU, single column", availableWidth: 100, numBars: 2, expectedCols: 1, expectedWidth: 60},      // 100 - 40 = 60
+		{name: "Wide space for two columns", availableWidth: 150, numBars: 4, expectedCols: 2, expectedWidth: 32},      // (150-5)/2 - 40 = 32.5 -> 32
+		{name: "Many GPUs, still max 2 columns", availableWidth: 300, numBars: 8, expectedCols: 2, expectedWidth: 107}, // (300-5)/2 - 40 = 107.5 -> 107
+		{name: "Single bar, force single column", availableWidth: 200, numBars: 1, expectedCols: 1, expectedWidth: 160}, // Single bar gets single column
+		{name: "Narrow space, fallback", availableWidth: 50, numBars: 4, expectedCols: 1, expectedWidth: 20},          // Too narrow, fallback
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			layout := calculateGPUBarLayout(tc.availableWidth, tc.numBars)
+			if layout.Columns != tc.expectedCols {
+				t.Errorf("Expected %d columns, got %d", tc.expectedCols, layout.Columns)
+			}
+			if layout.BarWidth != tc.expectedWidth {
+				t.Errorf("Expected bar width %d, got %d", tc.expectedWidth, layout.BarWidth)
 			}
 		})
 	}
