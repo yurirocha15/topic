@@ -18,6 +18,7 @@ import (
 	"github.com/rivo/tview"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -30,7 +31,7 @@ const (
 	minCPUInfoCount           = 2 // For cgroup CPU quota/period
 	minGPUUsageCount          = 2 // For nvidia-smi GPU usage
 	minGPUInfoCount           = 5 // For nvidia-smi pmon
-	waitDelta                 = 5
+	waitDelta                 = 7
 	percentMultiplier         = 100.0
 	bytesPerKB                = 1024
 	bytesPerMB                = bytesPerKB * 1024
@@ -96,6 +97,7 @@ type StaticInfo struct {
 	ContainerMemLimitBytes int64
 	ContainerMemLimitGB    float64
 	HostCores              int
+	HostMemTotalGB         float64
 	GPUCount               int
 	GPUTotalGB             []float64
 	StorageMounts          []StorageMount
@@ -125,9 +127,9 @@ type StorageUsage struct {
 
 // BarLayout holds information about how bars should be arranged.
 type BarLayout struct {
-	Columns     int // Number of columns
-	BarWidth    int // Width of each bar
-	TotalWidth  int // Total width used
+	Columns    int // Number of columns
+	BarWidth   int // Width of each bar
+	TotalWidth int // Total width used
 }
 
 // BarData holds information for rendering a single bar.
@@ -163,6 +165,8 @@ type DynamicInfo struct {
 	mu                 sync.Mutex
 	ContainerCPUUsage  float64
 	ContainerMemUsedGB float64
+	HostCPUUsage       float64
+	HostMemUsedGB      float64
 	LiveGPUUsage       []GPUUsage
 	StorageUsage       []StorageUsage
 	Processes          []ProcessInfo
@@ -306,24 +310,41 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	var builder strings.Builder
 
 	// --- CPU ---
-	cpuLabel := fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", state.dynamic.ContainerCPUUsage)
-	cpuInfo := fmt.Sprintf(" [darkcyan](limit: %.2f CPUs)[white]", state.static.ContainerCPULimit)
+	var cpuUsage float64
+	var cpuLabel, cpuInfo string
+
 	if state.static.ContainerCPULimit == float64(state.static.HostCores) {
+		// Running outside container or no cgroup limit - use host metrics
+		cpuUsage = state.dynamic.HostCPUUsage
+		cpuLabel = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", cpuUsage)
 		cpuInfo = fmt.Sprintf(" [darkcyan](no cgroup limit, %d host cores)[white]", state.static.HostCores)
+	} else {
+		// Running inside container with limits
+		cpuUsage = state.dynamic.ContainerCPUUsage
+		cpuLabel = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", cpuUsage)
+		cpuInfo = fmt.Sprintf(" [darkcyan](limit: %.2f CPUs)[white]", state.static.ContainerCPULimit)
 	}
+
 	// Calculate the width for the bar by subtracting the label and info text lengths.
 	cpuBarWidth := availableWidth - tview.TaggedStringWidth(cpuLabel) - tview.TaggedStringWidth(cpuInfo)
-	builder.WriteString(cpuLabel + makeBar(state.dynamic.ContainerCPUUsage, cpuBarWidth) + cpuInfo + "\n")
+	builder.WriteString(cpuLabel + makeBar(cpuUsage, cpuBarWidth) + cpuInfo + "\n")
 
 	// --- Memory ---
-	memPercent := 0.0
-	if state.static.ContainerMemLimitBytes > 0 {
-		memPercent = (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
-	}
-	memLabel := fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
-	memInfo := fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB[white]", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
+	var memPercent float64
+	var memLabel, memInfo string
+
 	if state.static.ContainerMemLimitGB == 0 {
-		memInfo = fmt.Sprintf(" [darkcyan]%.3f GB / N/A[white]", state.dynamic.ContainerMemUsedGB)
+		// Running outside container or no memory limit - use host metrics
+		if state.static.HostMemTotalGB > 0 {
+			memPercent = (state.dynamic.HostMemUsedGB / state.static.HostMemTotalGB) * percentMultiplier
+		}
+		memLabel = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
+		memInfo = fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB (no cgroup limit)[white]", state.dynamic.HostMemUsedGB, state.static.HostMemTotalGB)
+	} else {
+		// Running inside container with limits
+		memPercent = (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
+		memLabel = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
+		memInfo = fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB[white]", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
 	}
 	memBarWidth := availableWidth - tview.TaggedStringWidth(memLabel) - tview.TaggedStringWidth(memInfo)
 	builder.WriteString(memLabel + makeBar(memPercent, memBarWidth) + memInfo + "\n")
@@ -331,7 +352,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	// --- Storage ---
 	if len(state.dynamic.StorageUsage) > 0 {
 		builder.WriteString("\n")
-		
+
 		// Collect storage bars data
 		var storageBars []BarData
 		for _, storage := range state.dynamic.StorageUsage {
@@ -340,22 +361,22 @@ func updateResourceView(view *tview.TextView, state *State) int {
 			if len(displayPath) > 15 {
 				displayPath = "..." + displayPath[len(displayPath)-12:]
 			}
-			
+
 			storageBars = append(storageBars, BarData{
 				Label:   fmt.Sprintf("DISK %s: [yellow]%-6.1f%%[white]", displayPath, storage.UsedPercent),
 				Percent: storage.UsedPercent,
 				Info:    fmt.Sprintf("[darkcyan]%.2f GB / %.2f GB[white]", storage.UsedGB, storage.UsedGB+storage.FreeGB),
 			})
 		}
-		
+
 		// Calculate layout for storage bars
 		storageLayout := calculateBarLayout(availableWidth, len(storageBars))
-		
+
 		// Render storage bars using multi-column layout
 		if storageLayout.Columns == 1 {
 			// Single column - render with labels and info
 			for _, bar := range storageBars {
-				labelInfoWidth := tview.TaggedStringWidth(bar.Label) + tview.TaggedStringWidth(" " + bar.Info)
+				labelInfoWidth := tview.TaggedStringWidth(bar.Label) + tview.TaggedStringWidth(" "+bar.Info)
 				barWidth := availableWidth - labelInfoWidth
 				if barWidth < minBarWidth {
 					barWidth = minBarWidth
@@ -374,7 +395,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	// --- GPUs ---
 	if state.static.GPUCount > 0 {
 		builder.WriteString("\n")
-		
+
 		// Collect GPU bars data
 		var gpuBars []BarData
 		for i, gpu := range state.dynamic.LiveGPUUsage {
@@ -384,7 +405,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 				Percent: float64(gpu.Utilization),
 				Info:    "",
 			})
-			
+
 			// GPU Memory
 			gpuMemPercent := 0.0
 			if state.static.GPUTotalGB[i] > 0 {
@@ -396,15 +417,15 @@ func updateResourceView(view *tview.TextView, state *State) int {
 				Info:    fmt.Sprintf("[darkcyan]%.2f GB / %.2f GB[white]", gpu.MemUsedGB, state.static.GPUTotalGB[i]),
 			})
 		}
-		
+
 		// Calculate layout for GPU bars (limited to 1-2 columns)
 		gpuLayout := calculateGPUBarLayout(availableWidth, len(gpuBars))
-		
+
 		// Render GPU bars using multi-column layout
 		if gpuLayout.Columns == 1 {
 			// Single column - render with labels and info
 			for _, bar := range gpuBars {
-				labelInfoWidth := tview.TaggedStringWidth(bar.Label) + tview.TaggedStringWidth(" " + bar.Info)
+				labelInfoWidth := tview.TaggedStringWidth(bar.Label) + tview.TaggedStringWidth(" "+bar.Info)
 				barWidth := availableWidth - labelInfoWidth
 				if barWidth < minBarWidth {
 					barWidth = minBarWidth
@@ -487,7 +508,7 @@ func calculateBarLayout(availableWidth, numBars int) BarLayout {
 	// Estimate space needed for text per bar
 	// Labels are typically around 20-25 chars, info text around 20-25 chars
 	estimatedTextWidth := 50 // Conservative estimate for label + info + spacing
-	
+
 	// Try different numbers of columns, starting from the maximum possible
 	maxColumns := numBars
 	if maxColumns > 4 { // Practical limit for readability
@@ -497,13 +518,13 @@ func calculateBarLayout(availableWidth, numBars int) BarLayout {
 	for columns := maxColumns; columns >= 1; columns-- {
 		// Calculate space needed for spacing between columns
 		spacingWidth := (columns - 1) * columnSpacing
-		
+
 		// Calculate available width per column
 		availableWidthPerColumn := (availableWidth - spacingWidth) / columns
-		
+
 		// Each column needs space for text + bar
 		barWidth := availableWidthPerColumn - estimatedTextWidth
-		
+
 		if barWidth >= minBarWidth {
 			totalUsedWidth := columns*(barWidth+estimatedTextWidth) + spacingWidth
 			return BarLayout{
@@ -526,7 +547,7 @@ func calculateGPUBarLayout(availableWidth, numBars int) BarLayout {
 
 	// Estimate space needed for text per bar (GPU bars have shorter text)
 	estimatedTextWidth := 40 // GPU labels are shorter
-	
+
 	// GPU bars are limited to 1 or 2 columns for better readability
 	maxColumns := 2
 	if numBars == 1 {
@@ -536,13 +557,13 @@ func calculateGPUBarLayout(availableWidth, numBars int) BarLayout {
 	for columns := maxColumns; columns >= 1; columns-- {
 		// Calculate space needed for spacing between columns
 		spacingWidth := (columns - 1) * columnSpacing
-		
+
 		// Calculate available width per column
 		availableWidthPerColumn := (availableWidth - spacingWidth) / columns
-		
+
 		// Each column needs space for text + bar
 		barWidth := availableWidthPerColumn - estimatedTextWidth
-		
+
 		if barWidth >= minBarWidth {
 			totalUsedWidth := columns*(barWidth+estimatedTextWidth) + spacingWidth
 			return BarLayout{
@@ -569,13 +590,13 @@ func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 	// Calculate the maximum width needed for each column component
 	maxLabelWidth := 0
 	maxInfoWidth := 0
-	
+
 	for _, bar := range bars {
 		labelWidth := tview.TaggedStringWidth(bar.Label)
 		if labelWidth > maxLabelWidth {
 			maxLabelWidth = labelWidth
 		}
-		
+
 		infoWidth := tview.TaggedStringWidth(bar.Info)
 		if infoWidth > maxInfoWidth {
 			maxInfoWidth = infoWidth
@@ -584,7 +605,7 @@ func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 
 	for row := 0; row < numRows; row++ {
 		var completeBars []string
-		
+
 		for col := 0; col < layout.Columns; col++ {
 			barIndex := row*layout.Columns + col
 			if barIndex >= len(bars) {
@@ -593,19 +614,19 @@ func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 				completeBars = append(completeBars, strings.Repeat(" ", emptyWidth))
 				continue
 			}
-			
+
 			bar := bars[barIndex]
-			
+
 			// Pad label to consistent width
 			paddedLabel := bar.Label
 			labelPadding := maxLabelWidth - tview.TaggedStringWidth(bar.Label)
 			if labelPadding > 0 {
 				paddedLabel += strings.Repeat(" ", labelPadding)
 			}
-			
+
 			// Create the bar
 			barContent := makeBar(bar.Percent, layout.BarWidth)
-			
+
 			// Pad info to consistent width (if info exists)
 			var paddedInfo string
 			if bar.Info != "" {
@@ -614,7 +635,7 @@ func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 				if infoPadding > 0 {
 					paddedInfo += strings.Repeat(" ", infoPadding)
 				}
-				
+
 				// Complete bar: label + space + bar + space + info
 				completeLine := paddedLabel + " " + barContent + " " + paddedInfo
 				completeBars = append(completeBars, completeLine)
@@ -624,7 +645,7 @@ func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 				completeBars = append(completeBars, completeLine)
 			}
 		}
-		
+
 		// Join columns with spacing
 		result = append(result, strings.Join(completeBars, strings.Repeat(" ", columnSpacing)))
 	}
@@ -643,7 +664,7 @@ func makeMultiColumnBars(bars []BarData, layout BarLayout) []string {
 
 	for row := 0; row < numRows; row++ {
 		var rowParts []string
-		
+
 		for col := 0; col < layout.Columns; col++ {
 			barIndex := row*layout.Columns + col
 			if barIndex >= len(bars) {
@@ -652,40 +673,20 @@ func makeMultiColumnBars(bars []BarData, layout BarLayout) []string {
 				rowParts = append(rowParts, emptySpace)
 				continue
 			}
-			
+
 			bar := bars[barIndex]
-			
+
 			// Create the bar without label and info (those will be on separate lines)
 			barContent := makeBar(bar.Percent, layout.BarWidth)
 			rowParts = append(rowParts, barContent)
 		}
-		
+
 		// Join columns with spacing
 		rowLine := strings.Join(rowParts, strings.Repeat(" ", columnSpacing))
 		result = append(result, rowLine)
 	}
 
 	return result
-}
-
-// makeBarWithSeparation creates a visual bar with vertical separation characters.
-func makeBarWithSeparation(percent float64, barWidth int) string {
-	// Ensure barWidth is not negative.
-	if barWidth < 0 {
-		barWidth = 0
-	}
-
-	filledWidth := int((float64(barWidth) * percent) / percentMultiplier)
-	if filledWidth > barWidth {
-		filledWidth = barWidth
-	}
-	if filledWidth < 0 {
-		filledWidth = 0
-	}
-
-	// Use different characters to create visual separation
-	bar := strings.Repeat("▓", filledWidth) + strings.Repeat("░", barWidth-filledWidth)
-	return fmt.Sprintf("[green]%s[white]", bar)
 }
 
 // makeBar creates a visual bar representation of a percentage.
@@ -706,6 +707,24 @@ func makeBar(percent float64, barWidth int) string {
 	// Use characters that provide better visual separation between bars
 	bar := strings.Repeat("▓", filledWidth) + strings.Repeat("░", barWidth-filledWidth)
 	return fmt.Sprintf("[green]%s[white]", bar)
+}
+
+// --- Host System Functions ---
+
+// updateHostCPUUsage fetches current host CPU usage percentage.
+func updateHostCPUUsage() float64 {
+	if percentages, err := cpu.Percent(0, false); err == nil && len(percentages) > 0 {
+		return percentages[0]
+	}
+	return 0
+}
+
+// updateHostMemUsage fetches current host memory usage in GB.
+func updateHostMemUsage() float64 {
+	if memInfo, err := mem.VirtualMemory(); err == nil {
+		return float64(memInfo.Used) / float64(bytesPerGB)
+	}
+	return 0
 }
 
 // --- Data Fetching Functions ---
@@ -730,6 +749,8 @@ func updateAll(state *State, fs FileReader, runner CommandRunner) {
 		state.dynamic.StorageUsage = updateStorageUsage(state.static.StorageMounts)
 	}()
 	go func() { defer wg.Done(); state.dynamic.Processes = updateProcessList(&state.static, runner) }()
+	go func() { defer wg.Done(); state.dynamic.HostCPUUsage = updateHostCPUUsage() }()
+	go func() { defer wg.Done(); state.dynamic.HostMemUsedGB = updateHostMemUsage() }()
 	wg.Wait()
 }
 
@@ -748,6 +769,12 @@ func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticIn
 	}
 	info.ContainerCPULimit = getContainerCPULimit(info.CgroupVersion, info.HostCores, fs)
 	info.ContainerMemLimitBytes, info.ContainerMemLimitGB = getContainerMemLimit(info.CgroupVersion, fs)
+	hostMem, hostMemErr := mem.VirtualMemory()
+	if hostMemErr == nil {
+		info.HostMemTotalGB = float64(hostMem.Total) / float64(bytesPerGB)
+	} else {
+		info.HostMemTotalGB = 0
+	}
 	info.GPUCount, info.GPUTotalGB = getStaticGPUInfo(runner)
 	info.StorageMounts = getStaticStorageInfo()
 	return info, err
@@ -924,6 +951,7 @@ func shouldSkipFilesystem(fstype, mountpoint string) bool {
 		"tmpfs", "devtmpfs", "sysfs", "proc", "devpts", "cgroup", "cgroup2",
 		"pstore", "bpf", "debugfs", "tracefs", "securityfs", "fusectl",
 		"configfs", "selinuxfs", "mqueue", "hugetlbfs", "autofs", "rpc_pipefs",
+		"squashfs", "overlayfs",
 	}
 
 	for _, skip := range skipFsTypes {
@@ -941,6 +969,11 @@ func shouldSkipFilesystem(fstype, mountpoint string) bool {
 		if strings.HasPrefix(mountpoint, skip) {
 			return true
 		}
+	}
+
+	// Skip loop devices (often used by snap packages and other virtual filesystems)
+	if strings.Contains(mountpoint, "/loop") || strings.HasPrefix(mountpoint, "/snap/") {
+		return true
 	}
 
 	return false

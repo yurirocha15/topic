@@ -626,13 +626,13 @@ func TestCalculateBarLayout(t *testing.T) {
 		expectedCols   int
 		expectedWidth  int
 	}{
-		{name: "Wide space, single bar", availableWidth: 150, numBars: 1, expectedCols: 1, expectedWidth: 100},  // 150 - 50 = 100
-		{name: "Space for two columns", availableWidth: 150, numBars: 2, expectedCols: 2, expectedWidth: 22},   // (150-5)/2 - 50 = 22.5 -> 22
+		{name: "Wide space, single bar", availableWidth: 150, numBars: 1, expectedCols: 1, expectedWidth: 100},          // 150 - 50 = 100
+		{name: "Space for two columns", availableWidth: 150, numBars: 2, expectedCols: 2, expectedWidth: 22},            // (150-5)/2 - 50 = 22.5 -> 22
 		{name: "Narrow space, force single column", availableWidth: 80, numBars: 3, expectedCols: 1, expectedWidth: 30}, // 80 - 50 = 30
-		{name: "Exact minimum width", availableWidth: 70, numBars: 1, expectedCols: 1, expectedWidth: 20},      // 70 - 50 = 20
-		{name: "Below minimum width", availableWidth: 15, numBars: 1, expectedCols: 1, expectedWidth: 20},      // Should fallback to minBarWidth
-		{name: "No bars", availableWidth: 100, numBars: 0, expectedCols: 1, expectedWidth: 20},                 // Should fallback
-		{name: "Space for three columns", availableWidth: 230, numBars: 3, expectedCols: 3, expectedWidth: 23}, // (230-10)/3 - 50 = 23.33 -> 23
+		{name: "Exact minimum width", availableWidth: 70, numBars: 1, expectedCols: 1, expectedWidth: 20},               // 70 - 50 = 20
+		{name: "Below minimum width", availableWidth: 15, numBars: 1, expectedCols: 1, expectedWidth: 20},               // Should fallback to minBarWidth
+		{name: "No bars", availableWidth: 100, numBars: 0, expectedCols: 1, expectedWidth: 20},                          // Should fallback
+		{name: "Space for three columns", availableWidth: 230, numBars: 3, expectedCols: 3, expectedWidth: 23},          // (230-10)/3 - 50 = 23.33 -> 23
 	}
 
 	for _, tc := range testCases {
@@ -657,18 +657,18 @@ func TestMakeMultiColumnBars(t *testing.T) {
 		expectedRows int
 	}{
 		{
-			name: "Single bar, single column",
-			bars: []BarData{{Label: "Test", Percent: 50, Info: ""}},
-			layout: BarLayout{Columns: 1, BarWidth: 20, TotalWidth: 20},
+			name:         "Single bar, single column",
+			bars:         []BarData{{Label: "Test", Percent: 50, Info: ""}},
+			layout:       BarLayout{Columns: 1, BarWidth: 20, TotalWidth: 20},
 			expectedRows: 1,
 		},
 		{
-			name: "Two bars, two columns", 
+			name: "Two bars, two columns",
 			bars: []BarData{
 				{Label: "Test1", Percent: 50, Info: ""},
 				{Label: "Test2", Percent: 75, Info: ""},
 			},
-			layout: BarLayout{Columns: 2, BarWidth: 20, TotalWidth: 45},
+			layout:       BarLayout{Columns: 2, BarWidth: 20, TotalWidth: 45},
 			expectedRows: 1,
 		},
 		{
@@ -678,13 +678,13 @@ func TestMakeMultiColumnBars(t *testing.T) {
 				{Label: "Test2", Percent: 75, Info: ""},
 				{Label: "Test3", Percent: 25, Info: ""},
 			},
-			layout: BarLayout{Columns: 2, BarWidth: 20, TotalWidth: 45},
+			layout:       BarLayout{Columns: 2, BarWidth: 20, TotalWidth: 45},
 			expectedRows: 2,
 		},
 		{
-			name: "Empty bars",
-			bars: []BarData{},
-			layout: BarLayout{Columns: 1, BarWidth: 20, TotalWidth: 20},
+			name:         "Empty bars",
+			bars:         []BarData{},
+			layout:       BarLayout{Columns: 1, BarWidth: 20, TotalWidth: 20},
 			expectedRows: 0,
 		},
 	}
@@ -695,13 +695,13 @@ func TestMakeMultiColumnBars(t *testing.T) {
 			if len(result) != tc.expectedRows {
 				t.Errorf("Expected %d rows, got %d", tc.expectedRows, len(result))
 			}
-			
+
 			// Verify each row has the expected structure
 			for i, row := range result {
 				// Strip color tags for length checking
 				cleanRow := strings.Replace(row, "[green]", "", -1)
 				cleanRow = strings.Replace(cleanRow, "[white]", "", -1)
-				
+
 				// Should contain bar characters
 				if tc.expectedRows > 0 && !strings.ContainsAny(cleanRow, "▓░") {
 					t.Errorf("Row %d should contain bar characters, got: %s", i, cleanRow)
@@ -720,11 +720,11 @@ func TestCalculateGPUBarLayout(t *testing.T) {
 		expectedCols   int
 		expectedWidth  int
 	}{
-		{name: "Single GPU, single column", availableWidth: 100, numBars: 2, expectedCols: 1, expectedWidth: 60},      // 100 - 40 = 60
-		{name: "Wide space for two columns", availableWidth: 150, numBars: 4, expectedCols: 2, expectedWidth: 32},      // (150-5)/2 - 40 = 32.5 -> 32
-		{name: "Many GPUs, still max 2 columns", availableWidth: 300, numBars: 8, expectedCols: 2, expectedWidth: 107}, // (300-5)/2 - 40 = 107.5 -> 107
+		{name: "Single GPU, single column", availableWidth: 100, numBars: 2, expectedCols: 1, expectedWidth: 60},        // 100 - 40 = 60
+		{name: "Wide space for two columns", availableWidth: 150, numBars: 4, expectedCols: 2, expectedWidth: 32},       // (150-5)/2 - 40 = 32.5 -> 32
+		{name: "Many GPUs, still max 2 columns", availableWidth: 300, numBars: 8, expectedCols: 2, expectedWidth: 107},  // (300-5)/2 - 40 = 107.5 -> 107
 		{name: "Single bar, force single column", availableWidth: 200, numBars: 1, expectedCols: 1, expectedWidth: 160}, // Single bar gets single column
-		{name: "Narrow space, fallback", availableWidth: 50, numBars: 4, expectedCols: 1, expectedWidth: 20},          // Too narrow, fallback
+		{name: "Narrow space, fallback", availableWidth: 50, numBars: 4, expectedCols: 1, expectedWidth: 20},            // Too narrow, fallback
 	}
 
 	for _, tc := range testCases {
