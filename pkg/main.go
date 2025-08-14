@@ -17,6 +17,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -29,7 +30,7 @@ const (
 	minCPUInfoCount           = 2 // For cgroup CPU quota/period
 	minGPUUsageCount          = 2 // For nvidia-smi GPU usage
 	minGPUInfoCount           = 5 // For nvidia-smi pmon
-	waitDelta                 = 4
+	waitDelta                 = 5
 	percentMultiplier         = 100.0
 	bytesPerKB                = 1024
 	bytesPerMB                = bytesPerKB * 1024
@@ -95,6 +96,7 @@ type StaticInfo struct {
 	HostCores              int
 	GPUCount               int
 	GPUTotalGB             []float64
+	StorageMounts          []StorageMount
 }
 
 // GPUUsage holds live usage data for a single GPU.
@@ -102,6 +104,21 @@ type GPUUsage struct {
 	Index       int
 	Utilization int
 	MemUsedGB   float64
+}
+
+// StorageMount holds information about a mounted filesystem.
+type StorageMount struct {
+	Path    string  // Mount path (e.g., "/", "/home")
+	TotalGB float64 // Total capacity in GB
+	Fstype  string  // Filesystem type
+}
+
+// StorageUsage holds current usage data for a mounted filesystem.
+type StorageUsage struct {
+	Path        string  // Mount path
+	UsedGB      float64 // Used space in GB
+	FreeGB      float64 // Free space in GB
+	UsedPercent float64 // Usage percentage
 }
 
 // GPUProcessInfo holds usage data for a process on a GPU.
@@ -131,6 +148,7 @@ type DynamicInfo struct {
 	ContainerCPUUsage  float64
 	ContainerMemUsedGB float64
 	LiveGPUUsage       []GPUUsage
+	StorageUsage       []StorageUsage
 	Processes          []ProcessInfo
 }
 
@@ -294,6 +312,25 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	memBarWidth := availableWidth - tview.TaggedStringWidth(memLabel) - tview.TaggedStringWidth(memInfo)
 	builder.WriteString(memLabel + makeBar(memPercent, memBarWidth) + memInfo + "\n")
 
+	// --- Storage ---
+	if len(state.dynamic.StorageUsage) > 0 {
+		builder.WriteString("\n")
+		for _, storage := range state.dynamic.StorageUsage {
+			// Shorten long mount paths for display
+			displayPath := storage.Path
+			if len(displayPath) > 15 {
+				displayPath = "..." + displayPath[len(displayPath)-12:]
+			}
+
+			storageLabel := fmt.Sprintf("DISK %s: [yellow]%-6.1f%%[white] ", displayPath, storage.UsedPercent)
+			storageInfo := fmt.Sprintf(" [darkcyan]%.2f GB / %.2f GB[white]",
+				storage.UsedGB,
+				storage.UsedGB+storage.FreeGB)
+			storageBarWidth := availableWidth - tview.TaggedStringWidth(storageLabel) - tview.TaggedStringWidth(storageInfo)
+			builder.WriteString(storageLabel + makeBar(storage.UsedPercent, storageBarWidth) + storageInfo + "\n")
+		}
+	}
+
 	// --- GPUs ---
 	if state.static.GPUCount > 0 {
 		builder.WriteString("\n")
@@ -409,6 +446,10 @@ func updateAll(state *State, fs FileReader, runner CommandRunner) {
 		defer wg.Done()
 		state.dynamic.LiveGPUUsage = updateLiveGPUUsage(state.static.GPUCount, runner)
 	}()
+	go func() {
+		defer wg.Done()
+		state.dynamic.StorageUsage = updateStorageUsage(state.static.StorageMounts)
+	}()
 	go func() { defer wg.Done(); state.dynamic.Processes = updateProcessList(&state.static, runner) }()
 	wg.Wait()
 }
@@ -429,6 +470,7 @@ func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticIn
 	info.ContainerCPULimit = getContainerCPULimit(info.CgroupVersion, info.HostCores, fs)
 	info.ContainerMemLimitBytes, info.ContainerMemLimitGB = getContainerMemLimit(info.CgroupVersion, fs)
 	info.GPUCount, info.GPUTotalGB = getStaticGPUInfo(runner)
+	info.StorageMounts = getStaticStorageInfo()
 	return info, err
 }
 
@@ -564,6 +606,89 @@ func updateContainerMemUsage(cgroupVersion CgroupVersion, fs FileReader) float64
 		}
 	}
 	return 0
+}
+
+// getStaticStorageInfo fetches mounted filesystem information.
+func getStaticStorageInfo() []StorageMount {
+	partitions, err := disk.Partitions(false)
+	if err != nil {
+		return nil
+	}
+
+	var mounts []StorageMount
+	for _, partition := range partitions {
+		// Skip virtual filesystems and temporary mounts
+		if shouldSkipFilesystem(partition.Fstype, partition.Mountpoint) {
+			continue
+		}
+
+		usage, err := disk.Usage(partition.Mountpoint)
+		if err != nil {
+			continue
+		}
+
+		mount := StorageMount{
+			Path:    partition.Mountpoint,
+			TotalGB: float64(usage.Total) / float64(bytesPerGB),
+			Fstype:  partition.Fstype,
+		}
+		mounts = append(mounts, mount)
+	}
+
+	return mounts
+}
+
+// shouldSkipFilesystem determines if a filesystem should be skipped from monitoring.
+func shouldSkipFilesystem(fstype, mountpoint string) bool {
+	// Skip virtual/temporary filesystems
+	skipFsTypes := []string{
+		"tmpfs", "devtmpfs", "sysfs", "proc", "devpts", "cgroup", "cgroup2",
+		"pstore", "bpf", "debugfs", "tracefs", "securityfs", "fusectl",
+		"configfs", "selinuxfs", "mqueue", "hugetlbfs", "autofs", "rpc_pipefs",
+	}
+
+	for _, skip := range skipFsTypes {
+		if fstype == skip {
+			return true
+		}
+	}
+
+	// Skip system mount points
+	skipPaths := []string{
+		"/dev", "/sys", "/proc", "/run", "/tmp", "/var/run", "/var/lock",
+	}
+
+	for _, skip := range skipPaths {
+		if strings.HasPrefix(mountpoint, skip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// updateStorageUsage fetches current storage usage for all monitored mounts.
+func updateStorageUsage(storageMounts []StorageMount) []StorageUsage {
+	if len(storageMounts) == 0 {
+		return nil
+	}
+
+	var usage []StorageUsage
+	for _, mount := range storageMounts {
+		stat, err := disk.Usage(mount.Path)
+		if err != nil {
+			continue
+		}
+
+		usage = append(usage, StorageUsage{
+			Path:        mount.Path,
+			UsedGB:      float64(stat.Used) / float64(bytesPerGB),
+			FreeGB:      float64(stat.Free) / float64(bytesPerGB),
+			UsedPercent: stat.UsedPercent,
+		})
+	}
+
+	return usage
 }
 
 // getStaticGPUInfo fetches total memory for each GPU.

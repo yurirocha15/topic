@@ -588,3 +588,31 @@ func TestUpdateAll(t *testing.T) {
 		t.Error("Expected Processes list to be populated, but it was empty")
 	}
 }
+
+// TestShouldSkipFilesystem tests the filesystem filtering logic.
+func TestShouldSkipFilesystem(t *testing.T) {
+	testCases := []struct {
+		name       string
+		fstype     string
+		mountpoint string
+		expected   bool
+	}{
+		{name: "Skip tmpfs", fstype: "tmpfs", mountpoint: "/tmp", expected: true},
+		{name: "Skip proc", fstype: "proc", mountpoint: "/proc", expected: true},
+		{name: "Skip sys mount", fstype: "ext4", mountpoint: "/sys/something", expected: true},
+		{name: "Skip dev mount", fstype: "ext4", mountpoint: "/dev/shm", expected: true},
+		{name: "Keep root filesystem", fstype: "ext4", mountpoint: "/", expected: false},
+		{name: "Keep home filesystem", fstype: "ext4", mountpoint: "/home", expected: false},
+		{name: "Keep data filesystem", fstype: "xfs", mountpoint: "/data", expected: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := shouldSkipFilesystem(tc.fstype, tc.mountpoint)
+			if result != tc.expected {
+				t.Errorf("shouldSkipFilesystem(%q, %q) = %v, expected %v",
+					tc.fstype, tc.mountpoint, result, tc.expected)
+			}
+		})
+	}
+}
