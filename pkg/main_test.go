@@ -654,37 +654,3 @@ func TestCalculateBarLayout(t *testing.T) {
 		})
 	}
 }
-
-// TestCalculateGPUBarLayout tests the GPU-specific bar layout calculation with column limits.
-func TestCalculateGPUBarLayout(t *testing.T) {
-	testCases := []struct {
-		name           string
-		availableWidth int
-		numBars        int
-		expectedCols   int
-		expectedWidth  int
-	}{
-		// 100 - 40 = 60
-		{name: "Single GPU, single column", availableWidth: 100, numBars: 2, expectedCols: 1, expectedWidth: 60},
-		// (150-5)/2 - 40 = 32.5 -> 32
-		{name: "Wide space for two columns", availableWidth: 150, numBars: 4, expectedCols: 2, expectedWidth: 32},
-		// (300-5)/2 - 40 = 107.5 -> 107
-		{name: "Many GPUs, still max 2 columns", availableWidth: 300, numBars: 8, expectedCols: 2, expectedWidth: 107},
-		// Single bar gets single column
-		{name: "Single bar, force single column", availableWidth: 200, numBars: 1, expectedCols: 1, expectedWidth: 160},
-		// Too narrow, fallback
-		{name: "Narrow space, fallback", availableWidth: 50, numBars: 4, expectedCols: 1, expectedWidth: 20},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			layout := calculateGPUBarLayout(tc.availableWidth, tc.numBars)
-			if layout.Columns != tc.expectedCols {
-				t.Errorf("Expected %d columns, got %d", tc.expectedCols, layout.Columns)
-			}
-			if layout.BarWidth != tc.expectedWidth {
-				t.Errorf("Expected bar width %d, got %d", tc.expectedWidth, layout.BarWidth)
-			}
-		})
-	}
-}
