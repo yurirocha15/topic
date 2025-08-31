@@ -319,8 +319,11 @@ func updateResourceView(view *tview.TextView, state *State) int {
 
 	var builder strings.Builder
 
-	builder.WriteString(buildCPUSection(state, availableWidth))
-	builder.WriteString(buildMemorySection(state, availableWidth))
+	cpuLabel, cpuInfo, cpuUsage := calculateCPULabelInfo(state)
+	memLabel, memInfo, memPercent := calculateMEMLabelInfo(state)
+	barWidth := calculateBarWidth(availableWidth, []string{cpuLabel, memLabel}, []string{cpuInfo, memInfo})
+	builder.WriteString(buildCPUSection(barWidth, cpuLabel, cpuInfo, cpuUsage))
+	builder.WriteString(buildMemorySection(barWidth, memLabel, memInfo, memPercent))
 	if len(state.dynamic.StorageUsage) > 0 {
 		builder.WriteString(buildStorageSection(state, availableWidth))
 	}
@@ -333,48 +336,65 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	return strings.Count(finalText, "\n")
 }
 
-// calculateSystemBarDimensions calculates consistent bar width for CPU and MEM sections.
-func calculateSystemBarDimensions(state *State, availableWidth int) int {
-	// Prepare CPU label and info
-	var cpuLabel, cpuInfo string
+// calculateCPULabelInfo calculates the CPU label, info text, and usage percentage.
+func calculateCPULabelInfo(state *State) (string, string, float64) {
+	var usage float64
+	var label, info string
 	if state.static.ContainerCPULimit == float64(state.static.HostCores) {
-		cpuUsage := state.dynamic.HostCPUUsage
-		cpuLabel = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", cpuUsage)
-		cpuInfo = fmt.Sprintf(" [darkcyan](no cgroup limit, %d host cores)[white]", state.static.HostCores)
+		// Running outside container or no cgroup limit - use host metrics
+		usage = state.dynamic.HostCPUUsage
+		label = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", usage)
+		info = fmt.Sprintf(" [darkcyan](no cgroup limit, %d host cores)[white]", state.static.HostCores)
 	} else {
-		cpuUsage := state.dynamic.ContainerCPUUsage
-		cpuLabel = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", cpuUsage)
-		cpuInfo = fmt.Sprintf(" [darkcyan](limit: %.2f CPUs)[white]", state.static.ContainerCPULimit)
+		// Running inside container with limits
+		usage = state.dynamic.ContainerCPUUsage
+		label = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", usage)
+		info = fmt.Sprintf(" [darkcyan](limit: %.2f CPUs)[white]", state.static.ContainerCPULimit)
 	}
+	return label, info, usage
+}
 
-	// Prepare MEM label and info
-	var memLabel, memInfo string
+// calculateMEMLabelInfo calculates the MEM label, info text, and percentage.
+func calculateMEMLabelInfo(state *State) (string, string, float64) {
+	var percent float64
+	var label, info string
 	if state.static.ContainerMemLimitGB == 0 {
-		var memPercent float64
+		// Running outside container or no memory limit - use host metrics
 		if state.static.HostMemTotalGB > 0 {
-			memPercent = (state.dynamic.HostMemUsedGB / state.static.HostMemTotalGB) * percentMultiplier
+			percent = (state.dynamic.HostMemUsedGB / state.static.HostMemTotalGB) * percentMultiplier
 		}
-		memLabel = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
-		memInfo = fmt.Sprintf(
+		label = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", percent)
+		info = fmt.Sprintf(
 			" [darkcyan]%.3f GB / %.3f GB (no cgroup limit)[white]",
 			state.dynamic.HostMemUsedGB,
 			state.static.HostMemTotalGB,
 		)
 	} else {
-		memPercent := (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
-		memLabel = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
-		memInfo = fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB[white]", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
+		// Running inside container with limits
+		percent = (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
+		label = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", percent)
+		info = fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB[white]", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
+	}
+	return label, info, percent
+}
+
+// calculateBarWidth calculates optimal bar width given available width and label/info text arrays.
+// This is a general function that can be reused across different sections.
+func calculateBarWidth(availableWidth int, labels []string, infos []string) int {
+	// Find maximum label width
+	maxLabelWidth := 0
+	for _, label := range labels {
+		if width := tview.TaggedStringWidth(label); width > maxLabelWidth {
+			maxLabelWidth = width
+		}
 	}
 
-	// Calculate maximum dimensions
-	maxLabelWidth := tview.TaggedStringWidth(cpuLabel)
-	if memLabelWidth := tview.TaggedStringWidth(memLabel); memLabelWidth > maxLabelWidth {
-		maxLabelWidth = memLabelWidth
-	}
-
-	maxInfoWidth := tview.TaggedStringWidth(cpuInfo)
-	if memInfoWidth := tview.TaggedStringWidth(memInfo); memInfoWidth > maxInfoWidth {
-		maxInfoWidth = memInfoWidth
+	// Find maximum info width
+	maxInfoWidth := 0
+	for _, info := range infos {
+		if width := tview.TaggedStringWidth(info); width > maxInfoWidth {
+			maxInfoWidth = width
+		}
 	}
 
 	// Calculate consistent bar width
@@ -387,53 +407,13 @@ func calculateSystemBarDimensions(state *State, availableWidth int) int {
 }
 
 // buildCPUSection creates the CPU usage display section.
-func buildCPUSection(state *State, availableWidth int) string {
-	var cpuUsage float64
-	var cpuLabel, cpuInfo string
-
-	if state.static.ContainerCPULimit == float64(state.static.HostCores) {
-		// Running outside container or no cgroup limit - use host metrics
-		cpuUsage = state.dynamic.HostCPUUsage
-		cpuLabel = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", cpuUsage)
-		cpuInfo = fmt.Sprintf(" [darkcyan](no cgroup limit, %d host cores)[white]", state.static.HostCores)
-	} else {
-		// Running inside container with limits
-		cpuUsage = state.dynamic.ContainerCPUUsage
-		cpuLabel = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", cpuUsage)
-		cpuInfo = fmt.Sprintf(" [darkcyan](limit: %.2f CPUs)[white]", state.static.ContainerCPULimit)
-	}
-
-	// Use consistent bar width for CPU and MEM alignment
-	cpuBarWidth := calculateSystemBarDimensions(state, availableWidth)
-	return cpuLabel + makeBar(cpuUsage, cpuBarWidth) + cpuInfo + "\n"
+func buildCPUSection(barWidth int, cpuLabel string, cpuInfo string, cpuUsage float64) string {
+	return cpuLabel + makeBar(cpuUsage, barWidth) + cpuInfo + "\n"
 }
 
 // buildMemorySection creates the memory usage display section.
-func buildMemorySection(state *State, availableWidth int) string {
-	var memPercent float64
-	var memLabel, memInfo string
-
-	if state.static.ContainerMemLimitGB == 0 {
-		// Running outside container or no memory limit - use host metrics
-		if state.static.HostMemTotalGB > 0 {
-			memPercent = (state.dynamic.HostMemUsedGB / state.static.HostMemTotalGB) * percentMultiplier
-		}
-		memLabel = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
-		memInfo = fmt.Sprintf(
-			" [darkcyan]%.3f GB / %.3f GB (no cgroup limit)[white]",
-			state.dynamic.HostMemUsedGB,
-			state.static.HostMemTotalGB,
-		)
-	} else {
-		// Running inside container with limits
-		memPercent = (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
-		memLabel = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", memPercent)
-		memInfo = fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB[white]", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
-	}
-
-	// Use consistent bar width for CPU and MEM alignment
-	memBarWidth := calculateSystemBarDimensions(state, availableWidth)
-	return memLabel + makeBar(memPercent, memBarWidth) + memInfo + "\n"
+func buildMemorySection(barWidth int, memLabel string, memInfo string, memPercent float64) string {
+	return memLabel + makeBar(memPercent, barWidth) + memInfo + "\n"
 }
 
 // calculateAlignedLayout creates a layout that maximizes bar width while ensuring perfect alignment.
