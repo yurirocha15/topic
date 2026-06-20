@@ -807,21 +807,11 @@ func makeBar(percent float64, barWidth int) string {
 
 // --- Host System Functions ---
 
-// updateHostCPUUsage fetches current host CPU usage percentage.
-func updateHostCPUUsage() float64 {
-	return updateHostCPUUsageWithProvider(OSHostMetricsProvider{})
-}
-
 func updateHostCPUUsageWithProvider(provider HostMetricsProvider) float64 {
 	if percentages, err := provider.CPUPercent(0, false); err == nil && len(percentages) > 0 {
 		return percentages[0]
 	}
 	return 0
-}
-
-// updateHostMemUsage fetches current host memory usage in GB.
-func updateHostMemUsage() float64 {
-	return updateHostMemUsageWithProvider(OSHostMetricsProvider{})
 }
 
 func updateHostMemUsageWithProvider(provider HostMetricsProvider) float64 {
@@ -835,18 +825,27 @@ func updateHostMemUsageWithProvider(provider HostMetricsProvider) float64 {
 
 // updateAll fetches all dynamic data and updates the state.
 func updateAll(state *State, fs FileReader, runner CommandRunner) {
+	updateAllWithProviders(state, fs, runner, OSHostMetricsProvider{}, OSStorageProvider{}, OSProcessProvider{})
+}
+
+func updateAllWithProviders(
+	state *State,
+	fs FileReader,
+	runner CommandRunner,
+	hostProvider HostMetricsProvider,
+	storageProvider StorageProvider,
+	processProvider ProcessProvider,
+) {
 	staticInfo := state.static
-	dynamic := collectDynamicInfo(DynamicCollectorSet{
-		ContainerCPU: func() float64 { return updateContainerCPUUsage(state, fs) },
-		ContainerMem: func() float64 {
-			return updateContainerMemUsage(staticInfo.CgroupVersion, fs)
-		},
-		LiveGPU:   func() []GPUUsage { return updateLiveGPUUsage(staticInfo.GPUCount, runner) },
-		Storage:   func() []StorageUsage { return updateStorageUsage(staticInfo.StorageMounts) },
-		Processes: func() []ProcessInfo { return updateProcessList(&staticInfo, runner) },
-		HostCPU:   updateHostCPUUsage,
-		HostMem:   updateHostMemUsage,
-	})
+	dynamic := collectDynamicInfo(newDynamicCollectorSet(
+		state,
+		fs,
+		runner,
+		staticInfo,
+		hostProvider,
+		storageProvider,
+		processProvider,
+	))
 
 	state.dynamic.mu.Lock()
 	state.dynamic.ContainerCPUUsage = dynamic.ContainerCPUUsage
@@ -857,6 +856,61 @@ func updateAll(state *State, fs FileReader, runner CommandRunner) {
 	state.dynamic.HostCPUUsage = dynamic.HostCPUUsage
 	state.dynamic.HostMemUsedGB = dynamic.HostMemUsedGB
 	state.dynamic.mu.Unlock()
+}
+
+func newDynamicCollectorSet(
+	state *State,
+	fs FileReader,
+	runner CommandRunner,
+	staticInfo StaticInfo,
+	hostProvider HostMetricsProvider,
+	storageProvider StorageProvider,
+	processProvider ProcessProvider,
+) DynamicCollectorSet {
+	collectors := DynamicCollectorSet{
+		Storage: func() []StorageUsage {
+			return updateStorageUsageWithProvider(staticInfo.StorageMounts, storageProvider)
+		},
+		Processes: func() []ProcessInfo {
+			return updateProcessListWithProvider(&staticInfo, runner, processProvider)
+		},
+	}
+
+	if staticInfo.GPUCount > 0 {
+		collectors.LiveGPU = func() []GPUUsage {
+			return updateLiveGPUUsage(staticInfo.GPUCount, runner)
+		}
+	}
+
+	if usesContainerCPU(staticInfo) {
+		collectors.ContainerCPU = func() float64 {
+			return updateContainerCPUUsage(state, fs)
+		}
+	} else {
+		collectors.HostCPU = func() float64 {
+			return updateHostCPUUsageWithProvider(hostProvider)
+		}
+	}
+
+	if usesContainerMemory(staticInfo) {
+		collectors.ContainerMem = func() float64 {
+			return updateContainerMemUsage(staticInfo.CgroupVersion, fs)
+		}
+	} else {
+		collectors.HostMem = func() float64 {
+			return updateHostMemUsageWithProvider(hostProvider)
+		}
+	}
+
+	return collectors
+}
+
+func usesContainerCPU(staticInfo StaticInfo) bool {
+	return staticInfo.ContainerCPULimit > 0 && staticInfo.ContainerCPULimit != float64(staticInfo.HostCores)
+}
+
+func usesContainerMemory(staticInfo StaticInfo) bool {
+	return staticInfo.ContainerMemLimitBytes > 0
 }
 
 func collectDynamicInfo(collectors DynamicCollectorSet) DynamicSnapshot {
@@ -876,7 +930,6 @@ func collectDynamicInfoWithTiming(
 	var timingMu sync.Mutex
 	timings := make(map[string]time.Duration, dynamicCollectorCount)
 	var wg sync.WaitGroup
-	wg.Add(dynamicCollectorCount)
 
 	run := func(name string, collect func()) {
 		defer wg.Done()
@@ -888,13 +941,58 @@ func collectDynamicInfoWithTiming(
 		timingMu.Unlock()
 	}
 
-	go run("container_cpu", func() { dynamic.ContainerCPUUsage = collectors.ContainerCPU() })
-	go run("container_mem", func() { dynamic.ContainerMemUsedGB = collectors.ContainerMem() })
-	go run("live_gpu", func() { dynamic.LiveGPUUsage = collectors.LiveGPU() })
-	go run("storage", func() { dynamic.StorageUsage = collectors.Storage() })
-	go run("processes", func() { dynamic.Processes = collectors.Processes() })
-	go run("host_cpu", func() { dynamic.HostCPUUsage = collectors.HostCPU() })
-	go run("host_mem", func() { dynamic.HostMemUsedGB = collectors.HostMem() })
+	type collectorEntry struct {
+		name    string
+		collect func()
+	}
+	collectorEntries := make([]collectorEntry, 0, dynamicCollectorCount)
+	if collectors.ContainerCPU != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "container_cpu",
+			collect: func() { dynamic.ContainerCPUUsage = collectors.ContainerCPU() },
+		})
+	}
+	if collectors.ContainerMem != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "container_mem",
+			collect: func() { dynamic.ContainerMemUsedGB = collectors.ContainerMem() },
+		})
+	}
+	if collectors.LiveGPU != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "live_gpu",
+			collect: func() { dynamic.LiveGPUUsage = collectors.LiveGPU() },
+		})
+	}
+	if collectors.Storage != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "storage",
+			collect: func() { dynamic.StorageUsage = collectors.Storage() },
+		})
+	}
+	if collectors.Processes != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "processes",
+			collect: func() { dynamic.Processes = collectors.Processes() },
+		})
+	}
+	if collectors.HostCPU != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "host_cpu",
+			collect: func() { dynamic.HostCPUUsage = collectors.HostCPU() },
+		})
+	}
+	if collectors.HostMem != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "host_mem",
+			collect: func() { dynamic.HostMemUsedGB = collectors.HostMem() },
+		})
+	}
+
+	for _, entry := range collectorEntries {
+		wg.Add(1)
+		go run(entry.name, entry.collect)
+	}
 	wg.Wait()
 
 	return dynamic, timings
@@ -1152,11 +1250,6 @@ func shouldSkipFilesystem(fstype, mountpoint string) bool {
 	}
 
 	return false
-}
-
-// updateStorageUsage fetches current storage usage for all monitored mounts.
-func updateStorageUsage(storageMounts []StorageMount) []StorageUsage {
-	return updateStorageUsageWithProvider(storageMounts, OSStorageProvider{})
 }
 
 func updateStorageUsageWithProvider(storageMounts []StorageMount, provider StorageProvider) []StorageUsage {

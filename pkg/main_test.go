@@ -1164,9 +1164,10 @@ func TestUpdateAll(t *testing.T) {
 
 	state := &State{
 		static: StaticInfo{
-			CgroupVersion:     CgroupV2,
-			ContainerCPULimit: 2.0,
-			GPUCount:          1,
+			CgroupVersion:          CgroupV2,
+			ContainerCPULimit:      2.0,
+			ContainerMemLimitBytes: 2 * bytesPerGB,
+			GPUCount:               1,
 		},
 		prevCPUUsage: 1000000,
 		prevCPUTime:  time.Now().Add(-1 * time.Second),
@@ -1190,6 +1191,52 @@ func TestUpdateAll(t *testing.T) {
 	// A simple check that the process list was populated.
 	if len(state.dynamic.Processes) == 0 {
 		t.Error("Expected Processes list to be populated, but it was empty")
+	}
+}
+
+func TestNewDynamicCollectorSetSelectsRequiredCollectors(t *testing.T) {
+	state := &State{
+		static: StaticInfo{
+			HostCores:              8,
+			ContainerCPULimit:      2,
+			ContainerMemLimitBytes: bytesPerGB,
+			GPUCount:               1,
+		},
+	}
+
+	collectors := newDynamicCollectorSet(
+		state,
+		MockFileReader{},
+		MockCommandRunner{},
+		state.static,
+		MockHostMetricsProvider{},
+		MockStorageProvider{},
+		MockProcessProvider{},
+	)
+	if collectors.ContainerCPU == nil || collectors.ContainerMem == nil || collectors.LiveGPU == nil {
+		t.Fatal("Expected limited container with GPU to collect container CPU, container memory, and live GPU")
+	}
+	if collectors.HostCPU != nil || collectors.HostMem != nil {
+		t.Fatal("Did not expect host collectors when cgroup CPU and memory limits are active")
+	}
+
+	state.static.ContainerCPULimit = float64(state.static.HostCores)
+	state.static.ContainerMemLimitBytes = 0
+	state.static.GPUCount = 0
+	collectors = newDynamicCollectorSet(
+		state,
+		MockFileReader{},
+		MockCommandRunner{},
+		state.static,
+		MockHostMetricsProvider{},
+		MockStorageProvider{},
+		MockProcessProvider{},
+	)
+	if collectors.ContainerCPU != nil || collectors.ContainerMem != nil || collectors.LiveGPU != nil {
+		t.Fatal("Did not expect container or GPU collectors when host resources are displayed and no GPU is present")
+	}
+	if collectors.HostCPU == nil || collectors.HostMem == nil {
+		t.Fatal("Expected host collectors when no cgroup limits are active")
 	}
 }
 
@@ -1221,6 +1268,22 @@ func TestCollectDynamicInfoWithTiming(t *testing.T) {
 		if _, ok := timings[key]; !ok {
 			t.Fatalf("Expected timing key %q in %v", key, timings)
 		}
+	}
+}
+
+func TestCollectDynamicInfoWithTimingSkipsNilCollectors(t *testing.T) {
+	dynamic, timings := collectDynamicInfoWithTiming(DynamicCollectorSet{
+		HostCPU: func() float64 { return 42 },
+	}, time.Now)
+
+	if dynamic.HostCPUUsage != 42 {
+		t.Fatalf("Expected host CPU usage from collector, got %.1f", dynamic.HostCPUUsage)
+	}
+	if len(timings) != 1 {
+		t.Fatalf("Expected one timing entry, got %v", timings)
+	}
+	if _, ok := timings["host_cpu"]; !ok {
+		t.Fatalf("Expected host_cpu timing entry, got %v", timings)
 	}
 }
 
