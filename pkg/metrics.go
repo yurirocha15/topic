@@ -9,6 +9,7 @@ import (
 
 const (
 	historySize               = 30
+	minSparklineWidth         = 8
 	pressureResourceCount     = 3
 	keyedMetricFieldCount     = 2
 	keyValueFieldCount        = 2
@@ -291,7 +292,9 @@ func (ring *HistoryRing) Ordered() []float64 {
 		return nil
 	}
 	if !ring.Filled {
-		return append([]float64(nil), ring.Values[:ring.Next]...)
+		ordered := make([]float64, len(ring.Values))
+		copy(ordered[len(ordered)-ring.Next:], ring.Values[:ring.Next])
+		return ordered
 	}
 	ordered := make([]float64, 0, len(ring.Values))
 	ordered = append(ordered, ring.Values[ring.Next:]...)

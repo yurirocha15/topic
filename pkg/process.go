@@ -381,22 +381,22 @@ func nextProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
 	case SortByGPU:
 		return SortByGPUMemory
 	case SortByGPUMemory:
-		return SortByPID
+		return SortByCommand
 	case SortByPID:
 		return SortByUser
 	case SortByUser:
-		return SortByCommand
+		return SortByCPU
 	case SortByCommand:
 		fallthrough
 	default:
-		return SortByCPU
+		return SortByPID
 	}
 }
 
 func previousProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
 	switch current {
 	case SortByCPU:
-		return SortByCommand
+		return SortByUser
 	case SortByMemory:
 		return SortByCPU
 	case SortByGPU:
@@ -404,13 +404,13 @@ func previousProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
 	case SortByGPUMemory:
 		return SortByGPU
 	case SortByPID:
-		return SortByGPUMemory
+		return SortByCommand
 	case SortByUser:
 		return SortByPID
 	case SortByCommand:
 		fallthrough
 	default:
-		return SortByUser
+		return SortByGPUMemory
 	}
 }
 

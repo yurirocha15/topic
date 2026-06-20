@@ -18,6 +18,10 @@ func handleInput(
 	processTable *tview.Table,
 	signaler ProcessSignaler,
 ) *tcell.EventKey {
+	if closeModalInput(event, pages) {
+		return nil
+	}
+
 	state.dynamic.mu.Lock()
 	searchMode := state.ui.SearchMode
 	sortMode := state.ui.SortMode
@@ -84,6 +88,21 @@ func handleInput(
 	default:
 		return event
 	}
+}
+
+func closeModalInput(event *tcell.EventKey, pages *tview.Pages) bool {
+	if pages == nil {
+		return false
+	}
+	name, _ := pages.GetFrontPage()
+	if name == "" || name == "main" {
+		return false
+	}
+	if event.Key() == tcell.KeyEsc || event.Rune() == 'q' {
+		pages.RemovePage(name)
+		return true
+	}
+	return false
 }
 
 func handleSearchInput(event *tcell.EventKey, state *State) *tcell.EventKey {

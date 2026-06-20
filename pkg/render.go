@@ -110,7 +110,7 @@ func buildResourceText(availableWidth int, state *State) string {
 	if len(gpuBars) > 0 {
 		builder.WriteString(buildGPUSectionBars(sharedLayout, gpuBars))
 	}
-	builder.WriteString(buildMetricsSection(state))
+	builder.WriteString(buildMetricsSection(state, availableWidth))
 
 	return builder.String()
 }
@@ -339,7 +339,7 @@ func buildBarSection(layout BarLayout, bars []BarData) string {
 	return builder.String()
 }
 
-func buildMetricsSection(state *State) string {
+func buildMetricsSection(state *State, availableWidth int) string {
 	if len(state.dynamic.NetworkUsage) == 0 &&
 		len(state.dynamic.DiskIOUsage) == 0 &&
 		state.dynamic.PIDUsage.Current == 0 &&
@@ -371,24 +371,26 @@ func buildMetricsSection(state *State) string {
 	}
 	if len(state.dynamic.NetworkUsage) > 0 {
 		network := state.dynamic.NetworkUsage[0]
+		const networkSparklinePrefixWidth = 36
 		fmt.Fprintf(
 			&builder,
 			"NET %s: [yellow]RX %.2f MiB/s TX %.2f MiB/s[white] %s\n",
 			network.Name,
 			network.RXBytesPerSec/bytesPerSecondToMiBSecond,
 			network.TXBytesPerSec/bytesPerSecondToMiBSecond,
-			sparkline(state.history.Network),
+			sparklineForWidth(state.history.Network, availableWidth, networkSparklinePrefixWidth),
 		)
 	}
 	if len(state.dynamic.DiskIOUsage) > 0 {
 		disk := state.dynamic.DiskIOUsage[0]
+		const diskIOSparklinePrefixWidth = 32
 		fmt.Fprintf(
 			&builder,
 			"IO %s: [yellow]R %.2f MiB/s W %.2f MiB/s[white] %s\n",
 			disk.Name,
 			disk.ReadBytesPerSec/bytesPerSecondToMiBSecond,
 			disk.WriteBytesPerSec/bytesPerSecondToMiBSecond,
-			sparkline(state.history.DiskIO),
+			sparklineForWidth(state.history.DiskIO, availableWidth, diskIOSparklinePrefixWidth),
 		)
 	}
 	if len(state.dynamic.Pressure) > 0 {
@@ -405,15 +407,34 @@ func buildMetricsSection(state *State) string {
 		builder.WriteString("\n")
 	}
 	if state.history.CPU.Next > 0 || state.history.CPU.Filled {
-		fmt.Fprintf(
-			&builder,
-			"HIST CPU %s MEM %s GPU %s\n",
-			sparkline(state.history.CPU),
-			sparkline(state.history.Memory),
-			sparkline(state.history.GPU),
-		)
+		writeHistoryLine(&builder, "CPU", state.history.CPU, availableWidth)
+		writeHistoryLine(&builder, "MEM", state.history.Memory, availableWidth)
+		writeHistoryLine(&builder, "GPU", state.history.GPU, availableWidth)
 	}
 	return builder.String()
+}
+
+func writeHistoryLine(builder *strings.Builder, label string, ring HistoryRing, availableWidth int) {
+	fmt.Fprintf(builder, "HIST %s %s\n", label, sparklineForWidth(ring, availableWidth, len("HIST XXX ")))
+}
+
+func sparklineForWidth(ring HistoryRing, availableWidth int, prefixWidth int) string {
+	width := availableWidth - prefixWidth
+	if width > historySize {
+		width = historySize
+	}
+	if width < minSparklineWidth {
+		width = minSparklineWidth
+	}
+	return trimSparkline(sparkline(ring), width)
+}
+
+func trimSparkline(value string, width int) string {
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	return string(runes[len(runes)-width:])
 }
 
 // makeAlignedMultiColumnBars creates properly aligned bars in columns with consistent spacing.

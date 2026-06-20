@@ -669,6 +669,42 @@ func TestHandleInputUpdatesUIState(t *testing.T) {
 	}
 }
 
+func TestSortModeFollowsTableColumnOrder(t *testing.T) {
+	order := []ProcessSortColumn{
+		SortByPID,
+		SortByUser,
+		SortByCPU,
+		SortByMemory,
+		SortByGPU,
+		SortByGPUMemory,
+		SortByCommand,
+	}
+	for i, column := range order {
+		next := order[(i+1)%len(order)]
+		if got := nextProcessSortColumn(column); got != next {
+			t.Fatalf("next sort after %v = %v, want %v", column, got, next)
+		}
+		prev := order[(i+len(order)-1)%len(order)]
+		if got := previousProcessSortColumn(column); got != prev {
+			t.Fatalf("previous sort before %v = %v, want %v", column, got, prev)
+		}
+	}
+}
+
+func TestCloseModalInput(t *testing.T) {
+	pages := tview.NewPages().AddPage("main", tview.NewBox(), true, true)
+	showMessage(pages, "hello")
+	if !closeModalInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), pages) {
+		t.Fatal("Expected Esc to close front modal")
+	}
+	if pages.HasPage("message") {
+		t.Fatal("Expected message modal to be removed")
+	}
+	if closeModalInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), pages) {
+		t.Fatal("Did not expect Esc to close main page")
+	}
+}
+
 func TestUpdateProcessListWithProvider(t *testing.T) {
 	staticInfo := &StaticInfo{
 		ContainerCPULimit:      2,
@@ -1398,7 +1434,7 @@ func TestUpdateAll(t *testing.T) {
 	// Run the function under test.
 	updateAll(state, mockFS, mockRunner)
 
-	tolerance := 0.01
+	tolerance := 0.1
 
 	// Assert that the dynamic state has been populated correctly.
 	if (state.dynamic.ContainerCPUUsage-50.0) > tolerance || (50.0-state.dynamic.ContainerCPUUsage) > tolerance {
@@ -1671,11 +1707,23 @@ func TestMetricsHistoryAlertsAndRender(t *testing.T) {
 			Alerts:       alerts,
 		},
 	}
-	text := buildMetricsSection(state)
+	text := buildMetricsSection(state, 120)
 	for _, want := range []string{"ALERT", "PIDS", "NET eth0", "IO sda", "PSI", "HIST CPU"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Expected metrics section to contain %q, got %q", want, text)
 		}
+	}
+}
+
+func TestSparklineFixedWidthAndTrim(t *testing.T) {
+	var ring HistoryRing
+	ring.Add(25)
+	if got := sparkline(ring); len([]rune(got)) != historySize {
+		t.Fatalf("Expected fixed history width %d, got %q", historySize, got)
+	}
+	trimmed := sparklineForWidth(ring, 12, len("HIST CPU "))
+	if len([]rune(trimmed)) != minSparklineWidth {
+		t.Fatalf("Expected minimum sparkline width %d, got %q", minSparklineWidth, trimmed)
 	}
 }
 

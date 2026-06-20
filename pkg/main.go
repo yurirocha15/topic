@@ -154,6 +154,13 @@ func main() {
 		AddItem(processTable, 0, 1, true)               // Process table takes all remaining vertical space
 	pages := tview.NewPages().
 		AddPage("main", mainLayout, true, true)
+	render := func() {
+		leftHeight := updateResourceView(resourceView, state)
+		rightHeight := updateInfoView(infoView, state)
+		topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
+		mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
+		updateProcessTable(processTable, state)
+	}
 
 	// --- Goroutine for periodic updates ---
 	go func() {
@@ -164,28 +171,21 @@ func main() {
 			if !isPaused(state) {
 				updateAll(state, fileReader, cmdRunner)
 			}
-			app.QueueUpdateDraw(func() {
-				// Update all components and dynamically resize the top panel
-				leftHeight := updateResourceView(resourceView, state)
-				rightHeight := updateInfoView(infoView, state)
-				topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
-				mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
-				updateProcessTable(processTable, state)
-			})
+			app.QueueUpdateDraw(render)
 		}
 	}()
 
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		return handleInput(event, state, app, pages, processTable, OSProcessSignaler{})
+		nextEvent := handleInput(event, state, app, pages, processTable, OSProcessSignaler{})
+		if nextEvent == nil {
+			app.QueueUpdateDraw(render)
+		}
+		return nextEvent
 	})
 
 	// Initial data load and draw
 	updateAll(state, fileReader, cmdRunner)
-	leftHeight := updateResourceView(resourceView, state)
-	rightHeight := updateInfoView(infoView, state)
-	topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
-	mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
-	updateProcessTable(processTable, state)
+	render()
 
 	if err = app.SetRoot(pages, true).Run(); err != nil {
 		log.Fatalf("Could not start application: %v", err)
