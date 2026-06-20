@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rivo/tview"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 // --- Mock FileReader for Testing ---
@@ -51,6 +52,58 @@ type CountingCommandRunner struct {
 func (ccr *CountingCommandRunner) Output(_ string, _ ...string) ([]byte, error) {
 	ccr.calls++
 	return nil, errors.New("unexpected command call")
+}
+
+type MockProcessProvider struct {
+	processes []ProcessHandle
+	err       error
+}
+
+func (mpp MockProcessProvider) Processes() ([]ProcessHandle, error) {
+	return mpp.processes, mpp.err
+}
+
+type MockProcessHandle struct {
+	pid        int32
+	cpuPercent float64
+	rss        uint64
+	user       string
+	cmdline    string
+	name       string
+	err        error
+}
+
+func (mph MockProcessHandle) PID() int32 {
+	return mph.pid
+}
+
+func (mph MockProcessHandle) CPUPercent() (float64, error) {
+	return mph.cpuPercent, mph.err
+}
+
+func (mph MockProcessHandle) MemoryInfo() (*process.MemoryInfoStat, error) {
+	if mph.err != nil {
+		return nil, mph.err
+	}
+	return &process.MemoryInfoStat{RSS: mph.rss}, nil
+}
+
+func (mph MockProcessHandle) Username() (string, error) {
+	if mph.user == "" {
+		return "", errors.New("missing user")
+	}
+	return mph.user, nil
+}
+
+func (mph MockProcessHandle) Cmdline() (string, error) {
+	return mph.cmdline, nil
+}
+
+func (mph MockProcessHandle) Name() (string, error) {
+	if mph.name == "" {
+		return "", errors.New("missing name")
+	}
+	return mph.name, nil
 }
 
 // MockStater simulates os.Stat for testing cgroup version detection.
@@ -331,6 +384,66 @@ func TestUpdateProcessTable(t *testing.T) {
 	}
 	if got := table.GetCell(2, 4).Text; got != "70" {
 		t.Fatalf("Expected GPU util 70, got %q", got)
+	}
+
+	state.dynamic.Processes = state.dynamic.Processes[:1]
+	updateProcessTable(table, state)
+	if rows := table.GetRowCount(); rows != 2 {
+		t.Fatalf("Expected stale process rows to be removed, got %d rows", rows)
+	}
+}
+
+func TestUpdateProcessListWithProvider(t *testing.T) {
+	staticInfo := &StaticInfo{
+		ContainerCPULimit:      2,
+		ContainerMemLimitBytes: 4 * bytesPerGB,
+		GPUCount:               1,
+	}
+	runner := MockCommandRunner{
+		outputs: map[string]string{
+			"nvidia-smi pmon -c 1 -s um": "0 1002 C 70 40 - - python",
+		},
+	}
+	provider := MockProcessProvider{
+		processes: []ProcessHandle{
+			MockProcessHandle{pid: 1001, cpuPercent: 10, rss: bytesPerGB, cmdline: "", name: "worker"},
+			MockProcessHandle{
+				pid:        1002,
+				cpuPercent: 80,
+				rss:        2 * bytesPerGB,
+				user:       "alice",
+				cmdline:    "python train.py",
+			},
+			MockProcessHandle{pid: 1003, err: errors.New("skip")},
+		},
+	}
+
+	processes := updateProcessListWithProvider(staticInfo, runner, provider)
+	if len(processes) != 2 {
+		t.Fatalf("Expected 2 valid processes, got %d", len(processes))
+	}
+	if processes[0].PID != 1002 || processes[1].PID != 1001 {
+		t.Fatalf("Expected processes sorted by raw CPU, got %+v", processes)
+	}
+	if processes[0].CPUPercent != 40 || processes[0].MemPercent != 50 {
+		t.Fatalf("Unexpected container percentages for GPU process: %+v", processes[0])
+	}
+	if processes[0].GPUIndex != 0 || processes[0].GPUUtil != 70 || processes[0].GPUMemPercent != 40 {
+		t.Fatalf("Expected GPU data merged into process: %+v", processes[0])
+	}
+	if processes[1].User != "n/a" || processes[1].Command != "[worker]" {
+		t.Fatalf("Expected username and command fallbacks, got %+v", processes[1])
+	}
+}
+
+func TestUpdateProcessListWithProviderError(t *testing.T) {
+	processes := updateProcessListWithProvider(
+		&StaticInfo{},
+		MockCommandRunner{},
+		MockProcessProvider{err: errors.New("process failure")},
+	)
+	if processes != nil {
+		t.Fatalf("Expected nil process list on provider error, got %+v", processes)
 	}
 }
 

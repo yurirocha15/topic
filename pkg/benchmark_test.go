@@ -63,6 +63,19 @@ func BenchmarkUpdateProcessTable(b *testing.B) {
 	}
 }
 
+func BenchmarkUpdateProcessListWithProvider(b *testing.B) {
+	staticInfo := &StaticInfo{
+		ContainerCPULimit:      4,
+		ContainerMemLimitBytes: 8 * bytesPerGB,
+	}
+	provider := MockProcessProvider{processes: benchmarkProcessHandles(500)}
+	runner := MockCommandRunner{}
+
+	for range b.N {
+		_ = updateProcessListWithProvider(staticInfo, runner, provider)
+	}
+}
+
 func storageSectionBenchmarkFixture() (BarLayout, []string, []string, []float64) {
 	labels := []string{
 		"DISK /:        [yellow] 38.2%[white]",
@@ -136,6 +149,21 @@ func benchmarkProcesses(count int) []ProcessInfo {
 		if i%3 == 0 {
 			processes[i].GPUIndex = i % 2
 		}
+	}
+	return processes
+}
+
+func benchmarkProcessHandles(count int) []ProcessHandle {
+	processes := make([]ProcessHandle, 0, count)
+	for i := range count {
+		processes = append(processes, MockProcessHandle{
+			pid:        int32(1000 + i),
+			cpuPercent: float64((count - i) % 100),
+			rss:        uint64((i%8)+1) * bytesPerGB / 2,
+			user:       "worker",
+			cmdline:    "python train.py --batch-size 32 --worker",
+			name:       "python",
+		})
 	}
 	return processes
 }

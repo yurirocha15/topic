@@ -110,6 +110,44 @@ func (s OSStater) Stat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }
 
+// ProcessHandle exposes the process data needed by the process table.
+type ProcessHandle interface {
+	PID() int32
+	CPUPercent() (float64, error)
+	MemoryInfo() (*process.MemoryInfoStat, error)
+	Username() (string, error)
+	Cmdline() (string, error)
+	Name() (string, error)
+}
+
+// ProcessProvider lists processes from the operating system.
+type ProcessProvider interface {
+	Processes() ([]ProcessHandle, error)
+}
+
+// OSProcessProvider reads process information through gopsutil.
+type OSProcessProvider struct{}
+
+func (p OSProcessProvider) Processes() ([]ProcessHandle, error) {
+	procs, err := process.Processes()
+	if err != nil {
+		return nil, err
+	}
+	handles := make([]ProcessHandle, 0, len(procs))
+	for _, proc := range procs {
+		handles = append(handles, gopsutilProcessHandle{Process: proc})
+	}
+	return handles, nil
+}
+
+type gopsutilProcessHandle struct {
+	*process.Process
+}
+
+func (p gopsutilProcessHandle) PID() int32 {
+	return p.Pid
+}
+
 // --- Data Structures ---
 
 // CgroupVersion denotes the cgroup version (1 or 2).
@@ -666,61 +704,97 @@ func updateProcessTable(table *tview.Table, state *State) {
 	state.dynamic.mu.Lock()
 	defer state.dynamic.mu.Unlock()
 
-	table.Clear()
-
 	// --- Create Header ---
 	headers := []string{"PID", "USER", "%CPU", "%MEM", "%GPU", "%GPUMEM", "COMMAND"}
 	for i, header := range headers {
-		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
-			SetAlign(tview.AlignLeft).
-			SetSelectable(false)
-		table.SetCell(0, i, cell)
+		setTableCell(table, 0, i, header, tcell.ColorYellow, false, 0)
 	}
 
 	// --- Populate Data ---
 	for r, p := range state.dynamic.Processes {
 		// PID
 		columnIdx := 0
-		table.SetCell(r+1, columnIdx, tview.NewTableCell(strconv.Itoa(int(p.PID))).SetTextColor(tcell.ColorWhite))
+		setTableCell(table, r+1, columnIdx, strconv.Itoa(int(p.PID)), tcell.ColorWhite, true, 0)
 		// USER
 		columnIdx++
-		table.SetCell(r+1, columnIdx, tview.NewTableCell(p.User).SetTextColor(tcell.ColorGreen))
+		setTableCell(table, r+1, columnIdx, p.User, tcell.ColorGreen, true, 0)
 		// %CPU
 		columnIdx++
-		cpuCell := tview.NewTableCell(strconv.FormatFloat(p.CPUPercent, 'f', 1, 64)).
-			SetTextColor(tcell.ColorAqua)
-		table.SetCell(r+1, columnIdx, cpuCell)
+		setTableCell(
+			table,
+			r+1,
+			columnIdx,
+			strconv.FormatFloat(p.CPUPercent, 'f', 1, 64),
+			tcell.ColorAqua,
+			true,
+			0,
+		)
 		// %MEM
 		columnIdx++
-		memCell := tview.NewTableCell(strconv.FormatFloat(p.MemPercent, 'f', 1, 64)).
-			SetTextColor(tcell.ColorAqua)
-		table.SetCell(r+1, columnIdx, memCell)
+		setTableCell(
+			table,
+			r+1,
+			columnIdx,
+			strconv.FormatFloat(p.MemPercent, 'f', 1, 64),
+			tcell.ColorAqua,
+			true,
+			0,
+		)
 
 		// %GPU and %GPUMEM
 		columnIdx++
 		if p.GPUIndex != -1 {
-			gpuUtilCell := tview.NewTableCell(strconv.FormatUint(p.GPUUtil, 10)).
-				SetTextColor(tcell.ColorFuchsia)
-			table.SetCell(r+1, columnIdx, gpuUtilCell)
+			setTableCell(
+				table,
+				r+1,
+				columnIdx,
+				strconv.FormatUint(p.GPUUtil, 10),
+				tcell.ColorFuchsia,
+				true,
+				0,
+			)
 			columnIdx++
-			gpuMemCell := tview.NewTableCell(strconv.FormatFloat(p.GPUMemPercent, 'f', 1, 64)).
-				SetTextColor(tcell.ColorFuchsia)
-			table.SetCell(r+1, columnIdx, gpuMemCell)
+			setTableCell(
+				table,
+				r+1,
+				columnIdx,
+				strconv.FormatFloat(p.GPUMemPercent, 'f', 1, 64),
+				tcell.ColorFuchsia,
+				true,
+				0,
+			)
 		} else {
-			table.SetCell(r+1, columnIdx, tview.NewTableCell("-").SetTextColor(tcell.ColorDarkGray))
+			setTableCell(table, r+1, columnIdx, "-", tcell.ColorDarkGray, true, 0)
 			columnIdx++
-			table.SetCell(r+1, columnIdx, tview.NewTableCell("-").SetTextColor(tcell.ColorDarkGray))
+			setTableCell(table, r+1, columnIdx, "-", tcell.ColorDarkGray, true, 0)
 		}
 
 		// COMMAND
-		cmdCell := tview.NewTableCell(p.Command).
-			SetTextColor(tcell.ColorWhite).
-			SetExpansion(1).
-			SetMaxWidth(0) // Prevent truncation
 		columnIdx++
-		table.SetCell(r+1, columnIdx, cmdCell)
+		setTableCell(table, r+1, columnIdx, p.Command, tcell.ColorWhite, true, 1)
 	}
+
+	for row := table.GetRowCount() - 1; row > len(state.dynamic.Processes); row-- {
+		table.RemoveRow(row)
+	}
+}
+
+func setTableCell(
+	table *tview.Table,
+	row int,
+	column int,
+	text string,
+	color tcell.Color,
+	selectable bool,
+	expansion int,
+) {
+	cell := table.GetCell(row, column)
+	cell.SetText(text).
+		SetTextColor(color).
+		SetAlign(tview.AlignLeft).
+		SetSelectable(selectable).
+		SetExpansion(expansion)
+	table.SetCell(row, column, cell)
 }
 
 // makeAlignedMultiColumnBars creates properly aligned bars in columns with consistent spacing.
@@ -1334,11 +1408,15 @@ func parseGPUPercentField(value string) (uint64, error) {
 
 // updateProcessList fetches the current process list and adds resource usage info when possible.
 func updateProcessList(static *StaticInfo, runner CommandRunner) []ProcessInfo {
+	return updateProcessListWithProvider(static, runner, OSProcessProvider{})
+}
+
+func updateProcessListWithProvider(static *StaticInfo, runner CommandRunner, provider ProcessProvider) []ProcessInfo {
 	var gpuProcessMap map[int32]GPUProcessInfo
 	if static.GPUCount > 0 {
 		gpuProcessMap = getGPUProcessMap(runner)
 	}
-	procs, err := process.Processes()
+	procs, err := provider.Processes()
 	if err != nil {
 		return nil
 	}
@@ -1357,7 +1435,7 @@ func updateProcessList(static *StaticInfo, runner CommandRunner) []ProcessInfo {
 }
 
 func getProcessInfo(
-	p *process.Process,
+	p ProcessHandle,
 	static *StaticInfo,
 	gpuProcessMap map[int32]GPUProcessInfo,
 ) (ProcessInfo, bool) {
@@ -1392,7 +1470,7 @@ func getProcessInfo(
 	}
 
 	pi := ProcessInfo{
-		PID:        p.Pid,
+		PID:        p.PID(),
 		User:       user,
 		CPUPercent: containerCPUPercent,
 		MemPercent: containerMemPercent,
@@ -1400,7 +1478,7 @@ func getProcessInfo(
 		rawCPU:     cpuPercent,
 		GPUIndex:   -1,
 	}
-	if gpuInfo, onGPU := gpuProcessMap[p.Pid]; onGPU {
+	if gpuInfo, onGPU := gpuProcessMap[p.PID()]; onGPU {
 		pi.GPUIndex = gpuInfo.GPUIndex
 		pi.GPUUtil = gpuInfo.GPUUtil
 		pi.GPUMemPercent = float64(gpuInfo.GPUMemUtil)
