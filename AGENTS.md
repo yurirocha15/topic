@@ -13,6 +13,8 @@
 - `make lint` runs `golangci-lint run` from `pkg/`.
 - `make build` builds `dist/topic`.
 - `make test-integrations` runs deterministic fake integration tests plus a `--once --json` integration-status smoke check.
+- `make e2e-docker` validates Docker metadata from inside a real Docker container.
+- `make e2e-kubernetes` validates Kubernetes metadata from inside a real cluster pod.
 - Direct test loop: `cd pkg && go test ./...`.
 - Race check: `cd pkg && go test -race ./...`.
 - Baseline benchmarks: `cd pkg && go test -bench=. -benchmem -count=5 ./...`.
@@ -23,5 +25,6 @@
 - Keep cgroup parsing tolerant: missing or malformed files should degrade to empty/zero usage instead of crashing.
 - Treat missing GPU tooling as a normal no-GPU environment. Tests and benchmarks should mock `nvidia-smi`.
 - Docker, Kubernetes, and NVML integrations must remain optional. Test unavailable, disabled, partial, and success states with fake hooks; keep live integration tests skipped unless explicitly enabled.
+- Use the E2E targets for native-environment validation; `make test-integrations` only proves deterministic behavior and JSON status shape.
 - Avoid long work while holding the dynamic state mutex; collect values first, then publish a snapshot.
 - Preserve the TUI behavior unless a task explicitly asks for a visual/layout change.

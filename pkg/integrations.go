@@ -88,6 +88,9 @@ func discoverDockerMetadataWithProbe(
 	}
 	containerID := containerIDFromCgroup(fs)
 	if containerID == "" {
+		containerID = containerIDFromHostname(probe.getenv(kubernetesPodNameEnv))
+	}
+	if containerID == "" {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationDocker, Detail: "container id not found"}
 	}
 	metadata, err := probe.queryDocker(containerID)
@@ -113,6 +116,14 @@ func containerIDFromCgroup(fs FileReader) string {
 			}
 			return field
 		}
+	}
+	return ""
+}
+
+func containerIDFromHostname(hostname string) string {
+	hostname = strings.TrimSpace(hostname)
+	if len(hostname) >= containerIDMinLength && isContainerID(hostname) {
+		return hostname
 	}
 	return ""
 }

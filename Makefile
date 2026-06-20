@@ -41,6 +41,17 @@ test-integrations:
 	(cd $(MODULE_PATH) && $(GOTEST) -run 'Test(Discover.*Integration|DiscoverDocker|DiscoverKubernetes|DiscoverNVML|IntegrationParsing|LiveIntegration|WriteJSONSnapshot)' ./...)
 	@./scripts/smoke-integration.sh
 
+e2e-docker:
+	@echo "Running Docker E2E integration validation..."
+	@./scripts/e2e-docker-integration.sh
+
+e2e-kubernetes:
+	@echo "Running Kubernetes E2E integration validation..."
+	@./scripts/e2e-kubernetes-integration.sh
+
+e2e-integrations: e2e-docker e2e-kubernetes
+	@echo "Integration E2E validation passed."
+
 bench:
 	@echo "Running benchmarks..."
 	(cd $(MODULE_PATH) && $(GOTEST) -bench=. -benchmem -count=5 ./...)
@@ -79,6 +90,9 @@ help:
 	@echo "  run      Run the application"
 	@echo "  test     Run all tests"
 	@echo "  test-integrations Run fake integration tests and JSON smoke validation"
+	@echo "  e2e-docker Run Docker environment integration validation"
+	@echo "  e2e-kubernetes Run Kubernetes environment integration validation"
+	@echo "  e2e-integrations Run all real environment integration validation"
 	@echo "  bench    Run benchmarks"
 	@echo "  bench-save Run benchmarks and save output in tmp/benchmarks"
 	@echo "  lint     Lint the source code"
@@ -87,4 +101,4 @@ help:
 	@echo "  help     Show this help message"
 	@echo ""
 
-.PHONY: all build run clean test test-integrations bench bench-save deps lint help
+.PHONY: all build run clean test test-integrations e2e-docker e2e-kubernetes e2e-integrations bench bench-save deps lint help

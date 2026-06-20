@@ -2131,6 +2131,41 @@ func TestDiscoverDockerMetadataQueryError(t *testing.T) {
 	}
 }
 
+func TestDiscoverDockerMetadataFallsBackToHostname(t *testing.T) {
+	hostContainerID := "0123456789ab"
+	fs := MockFileReader{files: map[string]string{
+		procSelfCgroupPath: "0::/",
+	}}
+	probe := integrationProbe{
+		stat: func(path string) (os.FileInfo, error) {
+			if path == dockerSocketPath {
+				return fakeFileInfo{}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+		getenv: func(key string) string {
+			if key == kubernetesPodNameEnv {
+				return hostContainerID
+			}
+			return ""
+		},
+		queryDocker: func(id string) (ContainerMetadata, error) {
+			if id != hostContainerID {
+				t.Fatalf("Expected docker query to use hostname fallback %q, got %q", hostContainerID, id)
+			}
+			return ContainerMetadata{Name: "topic-hostname"}, nil
+		},
+	}
+	metadata, status := discoverDockerMetadataWithProbe(fs, AppConfig{}, probe)
+	if !status.Available || metadata.Name != "topic-hostname" {
+		t.Fatalf("Expected Docker metadata from hostname fallback, metadata=%+v status=%+v", metadata, status)
+	}
+
+	if got := containerIDFromHostname("not-a-container"); got != "" {
+		t.Fatalf("Expected invalid hostname to be ignored, got %q", got)
+	}
+}
+
 func TestDiscoverKubernetesMetadataWithHooks(t *testing.T) {
 	env := map[string]string{
 		kubernetesServiceHostEnv: "10.0.0.1",
