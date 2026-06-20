@@ -20,10 +20,14 @@ func handleInput(
 ) *tcell.EventKey {
 	state.dynamic.mu.Lock()
 	searchMode := state.ui.SearchMode
+	sortMode := state.ui.SortMode
 	state.dynamic.mu.Unlock()
 
 	if searchMode {
 		return handleSearchInput(event, state)
+	}
+	if sortMode {
+		return handleSortInput(event, state)
 	}
 
 	switch {
@@ -33,12 +37,13 @@ func handleInput(
 	case event.Rune() == '/':
 		updateUIState(state, func(ui *UIState) {
 			ui.SearchMode = true
-			ui.ProcessFilter = ""
+			ui.SortMode = false
 		})
 		return nil
 	case event.Rune() == 's':
 		updateUIState(state, func(ui *UIState) {
-			ui.ProcessSort = nextProcessSortColumn(ui.ProcessSort)
+			ui.SortMode = true
+			ui.SearchMode = false
 		})
 		return nil
 	case event.Rune() == 'r':
@@ -72,8 +77,8 @@ func handleInput(
 		return nil
 	case event.Key() == tcell.KeyEsc:
 		updateUIState(state, func(ui *UIState) {
-			ui.ProcessFilter = ""
 			ui.SearchMode = false
+			ui.SortMode = false
 		})
 		return nil
 	default:
@@ -86,8 +91,11 @@ func handleSearchInput(event *tcell.EventKey, state *State) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyEsc:
 		updateUIState(state, func(ui *UIState) {
-			ui.ProcessFilter = ""
 			ui.SearchMode = false
+		})
+	case tcell.KeyCtrlU:
+		updateUIState(state, func(ui *UIState) {
+			ui.ProcessFilter = ""
 		})
 	case tcell.KeyEnter:
 		updateUIState(state, func(ui *UIState) {
@@ -111,6 +119,35 @@ func handleSearchInput(event *tcell.EventKey, state *State) *tcell.EventKey {
 	return nil
 }
 
+func handleSortInput(event *tcell.EventKey, state *State) *tcell.EventKey {
+	//nolint:exhaustive // Sort mode only handles navigation/confirmation keys.
+	switch event.Key() {
+	case tcell.KeyEsc, tcell.KeyEnter:
+		updateUIState(state, func(ui *UIState) {
+			ui.SortMode = false
+		})
+	case tcell.KeyLeft:
+		updateUIState(state, func(ui *UIState) {
+			ui.ProcessSort = previousProcessSortColumn(ui.ProcessSort)
+		})
+	case tcell.KeyRight:
+		updateUIState(state, func(ui *UIState) {
+			ui.ProcessSort = nextProcessSortColumn(ui.ProcessSort)
+		})
+	case tcell.KeyUp:
+		updateUIState(state, func(ui *UIState) {
+			ui.ReverseSort = true
+		})
+	case tcell.KeyDown:
+		updateUIState(state, func(ui *UIState) {
+			ui.ReverseSort = false
+		})
+	default:
+		return nil
+	}
+	return nil
+}
+
 func updateUIState(state *State, update func(*UIState)) {
 	state.dynamic.mu.Lock()
 	update(&state.ui)
@@ -129,9 +166,12 @@ func showHelp(pages *tview.Pages) {
 q / Ctrl+C    quit
 ↑↓←→ / mouse  navigate process table
 /             filter processes
-Esc           clear filter / close modes
-s             cycle process sort column
-r             reverse sort
+s             sort mode
+←/→           choose sort column in sort mode
+↑/↓           choose sort direction in sort mode
+r             reverse sort outside sort mode
+Esc           leave sort/filter mode
+Ctrl+U        clear filter in filter mode
 p             pause refresh
 t             toggle process tree
 a             toggle ASCII art

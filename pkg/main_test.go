@@ -625,12 +625,15 @@ func TestHandleInputUpdatesUIState(t *testing.T) {
 	}
 
 	handleInput(tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModNone), state, app, pages, table, signaler)
-	handleInput(tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyRight, 0, tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), state, app, pages, table, signaler)
 	handleInput(tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone), state, app, pages, table, signaler)
 	handleInput(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone), state, app, pages, table, signaler)
 	handleInput(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), state, app, pages, table, signaler)
 	gotExpectedToggles := state.ui.ProcessSort == SortByMemory &&
 		state.ui.ReverseSort &&
+		!state.ui.SortMode &&
 		state.ui.Paused &&
 		state.ui.TreeMode &&
 		state.ui.HideASCIIArt
@@ -638,9 +641,11 @@ func TestHandleInputUpdatesUIState(t *testing.T) {
 		t.Fatalf("Expected sort/reverse/pause/ascii toggles, got %+v", state.ui)
 	}
 
+	handleInput(tcell.NewEventKey(tcell.KeyRune, '/', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyCtrlU, 0, tcell.ModNone), state, app, pages, table, signaler)
 	handleInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), state, app, pages, table, signaler)
 	if state.ui.ProcessFilter != "" {
-		t.Fatalf("Expected escape to clear filter, got %+v", state.ui)
+		t.Fatalf("Expected Ctrl+U to clear filter, got %+v", state.ui)
 	}
 }
 

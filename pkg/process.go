@@ -364,7 +364,10 @@ func processTableTitle(ui UIState, visibleCount int, totalCount int) string {
 		parts = append(parts, "["+strconv.Itoa(visibleCount)+"/"+strconv.Itoa(totalCount)+"]")
 	}
 	if ui.SearchMode {
-		parts = append(parts, "[typing]")
+		parts = append(parts, "[filter mode]")
+	}
+	if ui.SortMode {
+		parts = append(parts, "[sort mode: ←/→ column ↑/↓ direction]")
 	}
 	return strings.Join(parts, " ") + " "
 }
@@ -387,6 +390,27 @@ func nextProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
 		fallthrough
 	default:
 		return SortByCPU
+	}
+}
+
+func previousProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
+	switch current {
+	case SortByCPU:
+		return SortByCommand
+	case SortByMemory:
+		return SortByCPU
+	case SortByGPU:
+		return SortByMemory
+	case SortByGPUMemory:
+		return SortByGPU
+	case SortByPID:
+		return SortByGPUMemory
+	case SortByUser:
+		return SortByPID
+	case SortByCommand:
+		fallthrough
+	default:
+		return SortByUser
 	}
 }
 

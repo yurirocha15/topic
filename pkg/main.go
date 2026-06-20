@@ -181,8 +181,8 @@ func updateInfoView(view *tview.TextView, state *State) int {
 [darkgrey]top inside a container
 
 [darkgrey]Quit: q, Ctrl+C
-[darkgrey]Sort: s  Reverse: r
-[darkgrey]Filter: /  Clear: Esc
+[darkgrey]Sort mode: s  Reverse: r
+[darkgrey]Filter mode: /  Clear: Ctrl+U
 [darkgrey]Pause: p  Tree: t  ASCII: a
 [darkgrey]Details: Enter  Signal: k
 [darkgrey]Help: ?
@@ -205,8 +205,8 @@ func updateInfoView(view *tview.TextView, state *State) int {
 	guide := `
 
 [darkgrey]      Quit: q, Ctrl+C
-[darkgrey]      Sort: s  Reverse: r
-[darkgrey]    Filter: /  Clear: Esc
+[darkgrey] Sort mode: s  Reverse: r
+[darkgrey]Filter mode: /  Clear: Ctrl+U
 [darkgrey]     Pause: p  Tree: t  ASCII: a
 [darkgrey]   Details: Enter  Signal: k
 [darkgrey]      Help: ?

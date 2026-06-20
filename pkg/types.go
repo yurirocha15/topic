@@ -109,6 +109,7 @@ type UIState struct {
 	ReverseSort   bool
 	ProcessFilter string
 	SearchMode    bool
+	SortMode      bool
 	Paused        bool
 	TreeMode      bool
 	SelectedPID   int32
