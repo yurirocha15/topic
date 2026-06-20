@@ -1041,6 +1041,37 @@ func TestUpdateAll(t *testing.T) {
 	}
 }
 
+func TestCollectDynamicInfoWithTiming(t *testing.T) {
+	collectors := DynamicCollectorSet{
+		ContainerCPU: func() float64 { return 10 },
+		ContainerMem: func() float64 { return 1.5 },
+		LiveGPU:      func() []GPUUsage { return []GPUUsage{{Index: 0, Utilization: 50, MemUsedGB: 2}} },
+		Storage:      func() []StorageUsage { return []StorageUsage{{Path: "/", UsedPercent: 25}} },
+		Processes:    func() []ProcessInfo { return []ProcessInfo{{PID: 123, Command: "topic"}} },
+		HostCPU:      func() float64 { return 20 },
+		HostMem:      func() float64 { return 3.5 },
+	}
+
+	dynamic, timings := collectDynamicInfoWithTiming(collectors, time.Now)
+	if dynamic.ContainerCPUUsage != 10 ||
+		dynamic.ContainerMemUsedGB != 1.5 ||
+		dynamic.HostCPUUsage != 20 ||
+		dynamic.HostMemUsedGB != 3.5 {
+		t.Fatalf("Unexpected collected scalar data: %+v", dynamic)
+	}
+	if len(dynamic.LiveGPUUsage) != 1 || len(dynamic.StorageUsage) != 1 || len(dynamic.Processes) != 1 {
+		t.Fatalf("Unexpected collected slice data: %+v", dynamic)
+	}
+	expectedTimingKeys := []string{
+		"container_cpu", "container_mem", "live_gpu", "storage", "processes", "host_cpu", "host_mem",
+	}
+	for _, key := range expectedTimingKeys {
+		if _, ok := timings[key]; !ok {
+			t.Fatalf("Expected timing key %q in %v", key, timings)
+		}
+	}
+}
+
 // TestShouldSkipFilesystem tests the filesystem filtering logic.
 func TestShouldSkipFilesystem(t *testing.T) {
 	testCases := []struct {

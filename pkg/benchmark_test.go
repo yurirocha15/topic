@@ -76,6 +76,32 @@ func BenchmarkUpdateProcessListWithProvider(b *testing.B) {
 	}
 }
 
+func BenchmarkCollectDynamicInfoFake(b *testing.B) {
+	collectors := DynamicCollectorSet{
+		ContainerCPU: func() float64 { return 72.5 },
+		ContainerMem: func() float64 { return 3.75 },
+		LiveGPU: func() []GPUUsage {
+			return []GPUUsage{
+				{Index: 0, Utilization: 68, MemUsedGB: 12},
+				{Index: 1, Utilization: 31, MemUsedGB: 4},
+			}
+		},
+		Storage: func() []StorageUsage {
+			return []StorageUsage{
+				{Path: "/", UsedGB: 38.2, FreeGB: 61.8, UsedPercent: 38.2},
+				{Path: "/data", UsedGB: 71.4, FreeGB: 28.6, UsedPercent: 71.4},
+			}
+		},
+		Processes: func() []ProcessInfo { return benchmarkProcesses(100) },
+		HostCPU:   func() float64 { return 19 },
+		HostMem:   func() float64 { return 22 },
+	}
+
+	for range b.N {
+		_ = collectDynamicInfo(collectors)
+	}
+}
+
 func storageSectionBenchmarkFixture() (BarLayout, []string, []string, []float64) {
 	labels := []string{
 		"DISK /:        [yellow] 38.2%[white]",
