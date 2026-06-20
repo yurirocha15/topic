@@ -24,6 +24,37 @@ type StaticInfo struct {
 	GPUCount               int
 	GPUTotalGB             []float64
 	StorageMounts          []StorageMount
+	Metadata               ContainerMetadata
+	Integrations           []IntegrationStatus
+}
+
+type AppConfig struct {
+	RefreshInterval   time.Duration
+	DisableGPU        bool
+	DisableDocker     bool
+	DisableKubernetes bool
+	DisableNVML       bool
+	Once              bool
+	JSONOutput        bool
+	HideASCIIArt      bool
+	InitialSort       ProcessSortColumn
+}
+
+type ContainerMetadata struct {
+	Runtime   string            `json:"runtime,omitempty"`
+	ID        string            `json:"id,omitempty"`
+	Name      string            `json:"name,omitempty"`
+	Image     string            `json:"image,omitempty"`
+	Namespace string            `json:"namespace,omitempty"`
+	Pod       string            `json:"pod,omitempty"`
+	Node      string            `json:"node,omitempty"`
+	Labels    map[string]string `json:"labels,omitempty"`
+}
+
+type IntegrationStatus struct {
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 // GPUUsage holds live usage data for a single GPU.

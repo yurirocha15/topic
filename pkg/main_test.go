@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -1674,6 +1675,54 @@ func TestMetricsHistoryAlertsAndRender(t *testing.T) {
 	for _, want := range []string{"ALERT", "PIDS", "NET eth0", "IO sda", "PSI", "HIST CPU"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Expected metrics section to contain %q, got %q", want, text)
+		}
+	}
+}
+
+func TestIntegrationParsingAndStatusText(t *testing.T) {
+	containerID := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	fs := MockFileReader{files: map[string]string{
+		procSelfCgroupPath: "0::/docker/" + containerID,
+	}}
+	if got := containerIDFromCgroup(fs); got != containerID {
+		t.Fatalf("Expected container id %q, got %q", containerID, got)
+	}
+
+	podJSON := `{
+		"metadata": {"name": "topic-pod", "namespace": "default", "labels": {"app": "topic"}},
+		"spec": {"nodeName": "node-a", "containers": [{"image": "topic:latest"}]}
+	}`
+	metadata, err := parseKubernetesPod(strings.NewReader(podJSON))
+	if err != nil {
+		t.Fatalf("Expected pod metadata parse to succeed: %v", err)
+	}
+	if metadata.Pod != "topic-pod" || metadata.Namespace != "default" || metadata.Image != "topic:latest" {
+		t.Fatalf("Unexpected pod metadata: %+v", metadata)
+	}
+
+	text := integrationStatusText([]IntegrationStatus{
+		{Name: integrationDocker, Available: true},
+		{Name: integrationKubernetes, Detail: integrationUnavailable},
+	})
+	if !strings.Contains(text, "docker=+") || !strings.Contains(text, "kubernetes=-") {
+		t.Fatalf("Unexpected integration status text: %q", text)
+	}
+}
+
+func TestWriteJSONSnapshot(t *testing.T) {
+	state := resourceBenchmarkState()
+	state.static.Metadata = ContainerMetadata{Name: "topic", Runtime: integrationDocker}
+	state.static.Integrations = []IntegrationStatus{{Name: integrationDocker, Available: true}}
+	state.dynamic.Alerts = []Alert{{Level: alertWarning, Message: "test"}}
+
+	var buffer bytes.Buffer
+	if err := writeJSONSnapshot(&buffer, state); err != nil {
+		t.Fatalf("Expected JSON snapshot to write: %v", err)
+	}
+	output := buffer.String()
+	for _, want := range []string{`"timestamp"`, `"dynamic"`, `"metadata"`, `"integrations"`, `"test"`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("Expected JSON output to contain %q, got %q", want, output)
 		}
 	}
 }

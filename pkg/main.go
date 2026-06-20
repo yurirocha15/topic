@@ -2,9 +2,9 @@
 package main
 
 import (
-	"flag"
 	"log"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -79,8 +79,7 @@ const (
 // --- Main Application ---
 
 func main() {
-	hideASCII := flag.Bool("no-ascii", false, "hide the ASCII art panel")
-	flag.Parse()
+	config := parseConfig()
 
 	fileReader := OSFileReader{}
 	cmdRunner := OSCommandRunner{Timeout: commandTimeout}
@@ -90,12 +89,31 @@ func main() {
 	if err != nil {
 		log.Printf("Could not get all static info: %v. Continuing...", err)
 	}
+	if config.DisableGPU {
+		staticInfo.GPUCount = 0
+		staticInfo.GPUTotalGB = nil
+	}
+	staticInfo.Metadata, staticInfo.Integrations = discoverIntegrations(fileReader, config)
 
 	state := &State{
 		static:      staticInfo,
 		dynamic:     DynamicInfo{},
-		ui:          UIState{ProcessSort: SortByCPU, HideASCIIArt: *hideASCII},
+		ui:          UIState{ProcessSort: config.InitialSort, HideASCIIArt: config.HideASCIIArt},
 		prevCPUTime: time.Now(),
+	}
+
+	if config.Once {
+		updateAll(state, fileReader, cmdRunner)
+		if config.JSONOutput {
+			if err = writeJSONSnapshot(os.Stdout, state); err != nil {
+				log.Fatalf("Could not write JSON snapshot: %v", err)
+			}
+			return
+		}
+		if _, err = os.Stdout.WriteString(onceText(state)); err != nil {
+			log.Fatalf("Could not write snapshot: %v", err)
+		}
+		return
 	}
 
 	app := tview.NewApplication()
@@ -139,7 +157,7 @@ func main() {
 
 	// --- Goroutine for periodic updates ---
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := time.NewTicker(config.RefreshInterval)
 		defer ticker.Stop()
 		for {
 			<-ticker.C
@@ -185,6 +203,7 @@ func updateInfoView(view *tview.TextView, state *State) int {
 	if ui.HideASCIIArt {
 		fullText := `[::b]topic
 [darkgrey]top inside a container
+` + integrationStatusText(state.static.Integrations) + `
 
 [darkgrey]Quit: q, Ctrl+C
 [darkgrey]Sort mode: s  Reverse: r
@@ -208,7 +227,9 @@ func updateInfoView(view *tview.TextView, state *State) int {
 [yellow]     ░██      ░██████   ░██         ░██████  ░██████  
 `
 	subTitle := "\n       [::b]top inside a container"
+	integrations := integrationStatusText(state.static.Integrations)
 	guide := `
+` + integrations + `
 
 [darkgrey]      Quit: q, Ctrl+C
 [darkgrey] Sort mode: s  Reverse: r
@@ -222,4 +243,23 @@ func updateInfoView(view *tview.TextView, state *State) int {
 	fullText := asciiArt + subTitle + guide
 	view.SetText(fullText)
 	return strings.Count(fullText, "\n")
+}
+
+func integrationStatusText(statuses []IntegrationStatus) string {
+	if len(statuses) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("\n[darkgrey]Integrations:")
+	for _, status := range statuses {
+		marker := "-"
+		if status.Available {
+			marker = "+"
+		}
+		builder.WriteString(" ")
+		builder.WriteString(status.Name)
+		builder.WriteString("=")
+		builder.WriteString(marker)
+	}
+	return builder.String()
 }

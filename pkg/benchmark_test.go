@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"testing"
 	"time"
 
@@ -308,5 +309,16 @@ func BenchmarkEvaluateAlerts(b *testing.B) {
 
 	for range b.N {
 		_ = evaluateAlerts(staticInfo, dynamic)
+	}
+}
+
+func BenchmarkJSONSnapshot(b *testing.B) {
+	state := resourceBenchmarkState()
+	state.static.Metadata = ContainerMetadata{Name: "topic", Runtime: integrationDocker}
+	state.static.Integrations = []IntegrationStatus{{Name: integrationDocker, Available: true}}
+	state.dynamic.Alerts = []Alert{{Level: alertWarning, Message: "test"}}
+
+	for range b.N {
+		_ = writeJSONSnapshot(io.Discard, state)
 	}
 }
