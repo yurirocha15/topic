@@ -77,10 +77,14 @@ type GPUProcessInfo struct {
 // ProcessInfo holds information for a single monitored process.
 type ProcessInfo struct {
 	PID           int32
+	ParentPID     int32
 	User          string
 	CPUPercent    float64
 	MemPercent    float64
 	Command       string
+	StartTime     time.Time
+	ThreadCount   int32
+	OpenFileCount int
 	rawCPU        float64
 	GPUIndex      int
 	GPUUtil       uint64

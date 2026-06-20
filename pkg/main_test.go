@@ -68,16 +68,24 @@ func (mpp MockProcessProvider) Processes() ([]ProcessHandle, error) {
 
 type MockProcessHandle struct {
 	pid        int32
+	ppid       int32
 	cpuPercent float64
 	rss        uint64
 	user       string
 	cmdline    string
 	name       string
+	createTime int64
+	threads    int32
+	openFiles  int
 	err        error
 }
 
 func (mph MockProcessHandle) PID() int32 {
 	return mph.pid
+}
+
+func (mph MockProcessHandle) Ppid() (int32, error) {
+	return mph.ppid, mph.err
 }
 
 func (mph MockProcessHandle) CPUPercent() (float64, error) {
@@ -107,6 +115,37 @@ func (mph MockProcessHandle) Name() (string, error) {
 		return "", errors.New("missing name")
 	}
 	return mph.name, nil
+}
+
+func (mph MockProcessHandle) CreateTime() (int64, error) {
+	return mph.createTime, mph.err
+}
+
+func (mph MockProcessHandle) NumThreads() (int32, error) {
+	return mph.threads, mph.err
+}
+
+func (mph MockProcessHandle) OpenFiles() ([]process.OpenFilesStat, error) {
+	if mph.err != nil {
+		return nil, mph.err
+	}
+	files := make([]process.OpenFilesStat, mph.openFiles)
+	return files, nil
+}
+
+type MockProcessSignaler struct {
+	calls []signalCall
+	err   error
+}
+
+type signalCall struct {
+	pid    int32
+	signal os.Signal
+}
+
+func (mps *MockProcessSignaler) Signal(pid int32, signal os.Signal) error {
+	mps.calls = append(mps.calls, signalCall{pid: pid, signal: signal})
+	return mps.err
 }
 
 type MockHostMetricsProvider struct {
@@ -485,35 +524,121 @@ func TestPrepareProcessRowsSortFilterReverse(t *testing.T) {
 	}
 }
 
+func TestBuildProcessTreeRows(t *testing.T) {
+	processes := []ProcessInfo{
+		{PID: 3, ParentPID: 2, CPUPercent: 20, Command: "grandchild"},
+		{PID: 1, CPUPercent: 10, Command: "root"},
+		{PID: 4, ParentPID: 99, CPUPercent: 5, Command: "orphan"},
+		{PID: 2, ParentPID: 1, CPUPercent: 80, Command: "child"},
+	}
+
+	rows := buildProcessTreeRows(processes)
+	if len(rows) != len(processes) {
+		t.Fatalf("Expected %d rows, got %+v", len(processes), rows)
+	}
+	if rows[0].PID != 1 || rows[1].PID != 2 || rows[2].PID != 3 || rows[3].PID != 4 {
+		t.Fatalf("Unexpected tree order: %+v", rows)
+	}
+	if !strings.Contains(rows[1].Command, "└─ child") || !strings.Contains(rows[2].Command, "└─ grandchild") {
+		t.Fatalf("Expected child rows to be indented, got %+v", rows)
+	}
+}
+
+func TestProcessDetailsText(t *testing.T) {
+	process := ProcessInfo{
+		PID:           123,
+		ParentPID:     1,
+		User:          "alice",
+		CPUPercent:    12.5,
+		MemPercent:    33.3,
+		Command:       "topic",
+		StartTime:     time.Unix(10, 0),
+		ThreadCount:   4,
+		OpenFileCount: 8,
+		GPUIndex:      0,
+		GPUUtil:       70,
+		GPUMemPercent: 40,
+	}
+
+	text := processDetailsText(process)
+	for _, want := range []string{"PID: 123", "Parent PID: 1", "alice", "GPU0", "Threads: 4", "Open files: 8", "topic"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("Expected process details to contain %q, got %q", want, text)
+		}
+	}
+}
+
+func TestSelectedProcessUsesPreparedRows(t *testing.T) {
+	table := tview.NewTable()
+	table.Select(1, 0)
+	state := &State{
+		ui: UIState{ProcessSort: SortByMemory},
+		dynamic: DynamicInfo{
+			Processes: []ProcessInfo{
+				{PID: 1, CPUPercent: 90, MemPercent: 10, Command: "cpu"},
+				{PID: 2, CPUPercent: 10, MemPercent: 90, Command: "mem"},
+			},
+		},
+	}
+
+	process, ok := selectedProcess(table, state)
+	if !ok || process.PID != 2 {
+		t.Fatalf("Expected selected row to follow prepared sort order, got process=%+v ok=%v", process, ok)
+	}
+}
+
+func TestSendProcessSignal(t *testing.T) {
+	pages := tview.NewPages()
+	signaler := &MockProcessSignaler{}
+	sendProcessSignal(pages, signaler, 123, os.Interrupt)
+
+	if len(signaler.calls) != 1 || signaler.calls[0].pid != 123 || signaler.calls[0].signal != os.Interrupt {
+		t.Fatalf("Expected signal call, got %+v", signaler.calls)
+	}
+	if signalLabel(os.Interrupt) != "SIGINT" {
+		t.Fatalf("Expected SIGINT label for os.Interrupt")
+	}
+}
+
 func TestHandleInputUpdatesUIState(t *testing.T) {
 	state := &State{ui: UIState{ProcessSort: SortByCPU}}
 	app := tview.NewApplication()
+	pages := tview.NewPages()
+	table := tview.NewTable()
+	signaler := &MockProcessSignaler{}
 
-	if got := handleInput(tcell.NewEventKey(tcell.KeyRune, '/', tcell.ModNone), state, app); got != nil {
+	got := handleInput(tcell.NewEventKey(tcell.KeyRune, '/', tcell.ModNone), state, app, pages, table, signaler)
+	if got != nil {
 		t.Fatalf("Expected filter key to be consumed, got %v", got)
 	}
 	if !state.ui.SearchMode || state.ui.ProcessFilter != "" {
 		t.Fatalf("Expected search mode with empty filter, got %+v", state.ui)
 	}
 
-	handleInput(tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone), state, app)
-	handleInput(tcell.NewEventKey(tcell.KeyRune, 'y', tcell.ModNone), state, app)
-	handleInput(tcell.NewEventKey(tcell.KeyBackspace, 0, tcell.ModNone), state, app)
-	handleInput(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone), state, app)
-	handleInput(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'y', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyBackspace, 0, tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), state, app, pages, table, signaler)
 	if state.ui.SearchMode || state.ui.ProcessFilter != "pt" {
 		t.Fatalf("Expected typed filter pt after editing, got %+v", state.ui)
 	}
 
-	handleInput(tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModNone), state, app)
-	handleInput(tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone), state, app)
-	handleInput(tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone), state, app)
-	handleInput(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), state, app)
-	if state.ui.ProcessSort != SortByMemory || !state.ui.ReverseSort || !state.ui.Paused || !state.ui.HideASCIIArt {
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone), state, app, pages, table, signaler)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), state, app, pages, table, signaler)
+	gotExpectedToggles := state.ui.ProcessSort == SortByMemory &&
+		state.ui.ReverseSort &&
+		state.ui.Paused &&
+		state.ui.TreeMode &&
+		state.ui.HideASCIIArt
+	if !gotExpectedToggles {
 		t.Fatalf("Expected sort/reverse/pause/ascii toggles, got %+v", state.ui)
 	}
 
-	handleInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), state, app, pages, table, signaler)
 	if state.ui.ProcessFilter != "" {
 		t.Fatalf("Expected escape to clear filter, got %+v", state.ui)
 	}

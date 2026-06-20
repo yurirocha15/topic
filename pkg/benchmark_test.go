@@ -76,6 +76,19 @@ func BenchmarkPrepareProcessRowsFilterSort(b *testing.B) {
 	}
 }
 
+func BenchmarkBuildProcessTreeRows(b *testing.B) {
+	processes := benchmarkProcesses(500)
+	for i := range processes {
+		if i > 0 {
+			processes[i].ParentPID = processes[(i-1)/2].PID
+		}
+	}
+
+	for range b.N {
+		_ = buildProcessTreeRows(processes)
+	}
+}
+
 func BenchmarkUpdateProcessListWithProvider(b *testing.B) {
 	staticInfo := &StaticInfo{
 		ContainerCPULimit:      4,

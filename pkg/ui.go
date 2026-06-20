@@ -1,13 +1,23 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"syscall"
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
-func handleInput(event *tcell.EventKey, state *State, app *tview.Application) *tcell.EventKey {
+func handleInput(
+	event *tcell.EventKey,
+	state *State,
+	app *tview.Application,
+	pages *tview.Pages,
+	processTable *tview.Table,
+	signaler ProcessSignaler,
+) *tcell.EventKey {
 	state.dynamic.mu.Lock()
 	searchMode := state.ui.SearchMode
 	state.dynamic.mu.Unlock()
@@ -45,6 +55,15 @@ func handleInput(event *tcell.EventKey, state *State, app *tview.Application) *t
 		updateUIState(state, func(ui *UIState) {
 			ui.TreeMode = !ui.TreeMode
 		})
+		return nil
+	case event.Rune() == '?':
+		showHelp(pages)
+		return nil
+	case event.Key() == tcell.KeyEnter:
+		showProcessDetails(pages, state, processTable)
+		return nil
+	case event.Rune() == 'k':
+		showSignalDialog(pages, state, processTable, signaler)
 		return nil
 	case event.Rune() == 'a':
 		updateUIState(state, func(ui *UIState) {
@@ -102,4 +121,98 @@ func isPaused(state *State) bool {
 	state.dynamic.mu.Lock()
 	defer state.dynamic.mu.Unlock()
 	return state.ui.Paused
+}
+
+func showHelp(pages *tview.Pages) {
+	text := `topic controls
+
+q / Ctrl+C    quit
+↑↓←→ / mouse  navigate process table
+/             filter processes
+Esc           clear filter / close modes
+s             cycle process sort column
+r             reverse sort
+p             pause refresh
+t             toggle process tree
+a             toggle ASCII art
+Enter         process details
+k             signal selected process
+?             this help`
+	showModal(pages, "help", text, []string{"OK"}, nil)
+}
+
+func showProcessDetails(pages *tview.Pages, state *State, table *tview.Table) {
+	process, ok := selectedProcess(table, state)
+	if !ok {
+		showMessage(pages, "No process selected")
+		return
+	}
+	updateUIState(state, func(ui *UIState) {
+		ui.SelectedPID = process.PID
+	})
+	showModal(pages, "process-details", processDetailsText(process), []string{"OK"}, nil)
+}
+
+func showSignalDialog(pages *tview.Pages, state *State, table *tview.Table, signaler ProcessSignaler) {
+	process, ok := selectedProcess(table, state)
+	if !ok {
+		showMessage(pages, "No process selected")
+		return
+	}
+	updateUIState(state, func(ui *UIState) {
+		ui.SelectedPID = process.PID
+	})
+	text := fmt.Sprintf("Send a signal to PID %d?\n\n%s", process.PID, process.Command)
+	showModal(pages, "signal", text, []string{signalTermLabel, signalKillLabel, "Cancel"}, func(_ int, label string) {
+		switch label {
+		case signalTermLabel:
+			sendProcessSignal(pages, signaler, process.PID, syscall.SIGTERM)
+		case signalKillLabel:
+			confirmSIGKILL(pages, signaler, process.PID)
+		}
+	})
+}
+
+func confirmSIGKILL(pages *tview.Pages, signaler ProcessSignaler, pid int32) {
+	text := fmt.Sprintf("Really send SIGKILL to PID %d?\n\nThis cannot be handled by the process.", pid)
+	showModal(pages, "signal-confirm", text, []string{"Kill", "Cancel"}, func(_ int, label string) {
+		if label == "Kill" {
+			sendProcessSignal(pages, signaler, pid, syscall.SIGKILL)
+		}
+	})
+}
+
+func sendProcessSignal(pages *tview.Pages, signaler ProcessSignaler, pid int32, signal os.Signal) {
+	if signaler == nil {
+		showMessage(pages, "Process signaling is unavailable")
+		return
+	}
+	if err := signaler.Signal(pid, signal); err != nil {
+		showMessage(pages, fmt.Sprintf("Failed to send %s to PID %d: %v", signalLabel(signal), pid, err))
+		return
+	}
+	showMessage(pages, fmt.Sprintf("Sent %s to PID %d", signalLabel(signal), pid))
+}
+
+func showMessage(pages *tview.Pages, text string) {
+	showModal(pages, "message", text, []string{"OK"}, nil)
+}
+
+func showModal(
+	pages *tview.Pages,
+	name string,
+	text string,
+	buttons []string,
+	done func(buttonIndex int, buttonLabel string),
+) {
+	modal := tview.NewModal().
+		SetText(text).
+		AddButtons(buttons).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage(name)
+			if done != nil {
+				done(buttonIndex, buttonLabel)
+			}
+		})
+	pages.AddPage(name, modal, true, true)
 }

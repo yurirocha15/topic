@@ -65,6 +65,9 @@ const (
 	nvidiaSMIPMonSampleCount  = "1"
 	nvidiaSMIPMonSelectFlag   = "-s"
 	nvidiaSMIPMonUsageMemory  = "um"
+	signalTermLabel           = "SIGTERM"
+	signalKillLabel           = "SIGKILL"
+	signalIntLabel            = "SIGINT"
 )
 
 // --- Main Application ---
@@ -125,6 +128,8 @@ func main() {
 		SetDirection(tview.FlexRow).
 		AddItem(topPanel, placeholderHeight, 0, false). // Top panel has a placeholder height, will be resized
 		AddItem(processTable, 0, 1, true)               // Process table takes all remaining vertical space
+	pages := tview.NewPages().
+		AddPage("main", mainLayout, true, true)
 
 	// --- Goroutine for periodic updates ---
 	go func() {
@@ -147,7 +152,7 @@ func main() {
 	}()
 
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		return handleInput(event, state, app)
+		return handleInput(event, state, app, pages, processTable, OSProcessSignaler{})
 	})
 
 	// Initial data load and draw
@@ -158,7 +163,7 @@ func main() {
 	mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
 	updateProcessTable(processTable, state)
 
-	if err = app.SetRoot(mainLayout, true).Run(); err != nil {
+	if err = app.SetRoot(pages, true).Run(); err != nil {
 		log.Fatalf("Could not start application: %v", err)
 	}
 }
@@ -178,7 +183,9 @@ func updateInfoView(view *tview.TextView, state *State) int {
 [darkgrey]Quit: q, Ctrl+C
 [darkgrey]Sort: s  Reverse: r
 [darkgrey]Filter: /  Clear: Esc
-[darkgrey]Pause: p  ASCII: a
+[darkgrey]Pause: p  Tree: t  ASCII: a
+[darkgrey]Details: Enter  Signal: k
+[darkgrey]Help: ?
 [darkgrey]Navigate: ←↑→↓ / Mouse
 `
 		view.SetText(fullText)
@@ -200,7 +207,9 @@ func updateInfoView(view *tview.TextView, state *State) int {
 [darkgrey]      Quit: q, Ctrl+C
 [darkgrey]      Sort: s  Reverse: r
 [darkgrey]    Filter: /  Clear: Esc
-[darkgrey]     Pause: p  ASCII: a
+[darkgrey]     Pause: p  Tree: t  ASCII: a
+[darkgrey]   Details: Enter  Signal: k
+[darkgrey]      Help: ?
 [darkgrey]  Navigate: ←↑→↓ / Mouse
 [darkgrey]                        `
 

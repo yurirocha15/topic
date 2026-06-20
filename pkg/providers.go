@@ -59,16 +59,25 @@ func (s OSStater) Stat(path string) (os.FileInfo, error) {
 // ProcessHandle exposes the process data needed by the process table.
 type ProcessHandle interface {
 	PID() int32
+	Ppid() (int32, error)
 	CPUPercent() (float64, error)
 	MemoryInfo() (*process.MemoryInfoStat, error)
 	Username() (string, error)
 	Cmdline() (string, error)
 	Name() (string, error)
+	CreateTime() (int64, error)
+	NumThreads() (int32, error)
+	OpenFiles() ([]process.OpenFilesStat, error)
 }
 
 // ProcessProvider lists processes from the operating system.
 type ProcessProvider interface {
 	Processes() ([]ProcessHandle, error)
+}
+
+// ProcessSignaler sends signals to operating-system processes.
+type ProcessSignaler interface {
+	Signal(pid int32, signal os.Signal) error
 }
 
 // HostMetricsProvider exposes host CPU and memory metrics.
@@ -105,6 +114,17 @@ type gopsutilProcessHandle struct {
 
 func (p gopsutilProcessHandle) PID() int32 {
 	return p.Pid
+}
+
+// OSProcessSignaler sends a signal to a process by PID.
+type OSProcessSignaler struct{}
+
+func (s OSProcessSignaler) Signal(pid int32, signal os.Signal) error {
+	process, err := os.FindProcess(int(pid))
+	if err != nil {
+		return err
+	}
+	return process.Signal(signal)
 }
 
 // OSHostMetricsProvider reads host metrics through gopsutil.
