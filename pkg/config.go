@@ -14,6 +14,7 @@ func parseConfig() AppConfig {
 	noNVML := flag.Bool("no-nvml", false, "disable NVML GPU integration")
 	once := flag.Bool("once", false, "collect one snapshot and exit")
 	jsonOutput := flag.Bool("json", false, "print a JSON snapshot; implies --once")
+	showASCII := flag.Bool("ascii", false, "show the ASCII art panel at startup")
 	hideASCII := flag.Bool("no-ascii", false, "hide the ASCII art panel")
 	sortColumn := flag.String("sort", "cpu", "initial process sort: cpu, mem, gpu, gpumem, pid, user, command")
 	flag.Parse()
@@ -26,7 +27,7 @@ func parseConfig() AppConfig {
 		DisableNVML:       *noNVML,
 		Once:              *once || *jsonOutput,
 		JSONOutput:        *jsonOutput,
-		HideASCIIArt:      *hideASCII,
+		HideASCIIArt:      !*showASCII || *hideASCII,
 		InitialSort:       parseProcessSortColumn(*sortColumn),
 	}
 }

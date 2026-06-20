@@ -23,6 +23,16 @@ const (
 	processCommandColumn
 )
 
+const (
+	processPIDLabel       = "PID"
+	processUserLabel      = "USER"
+	processCPULabel       = "%CPU"
+	processMemoryLabel    = "%MEM"
+	processGPULabel       = "%GPU"
+	processGPUMemoryLabel = "%GPUMEM"
+	processCommandLabel   = "COMMAND"
+)
+
 func updateProcessTable(table *tview.Table, state *State) {
 	state.dynamic.mu.Lock()
 	ui := state.ui
@@ -260,7 +270,15 @@ func treeCommand(command string, depth int) string {
 }
 
 func processTableHeaders(ui UIState) []string {
-	headers := []string{"PID", "USER", "%CPU", "%MEM", "%GPU", "%GPUMEM", "COMMAND"}
+	headers := []string{
+		processPIDLabel,
+		processUserLabel,
+		processCPULabel,
+		processMemoryLabel,
+		processGPULabel,
+		processGPUMemoryLabel,
+		processCommandLabel,
+	}
 	sortIndex := processSortHeaderIndex(ui.ProcessSort)
 	if sortIndex >= 0 && sortIndex < len(headers) {
 		marker := "↓"

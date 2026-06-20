@@ -456,24 +456,106 @@ func TestBuildCPUAndMemorySections(t *testing.T) {
 
 func TestUpdateInfoView(t *testing.T) {
 	view := tview.NewTextView()
-	state := &State{}
+	state := &State{ui: UIState{HideASCIIArt: true, ProcessSort: SortByCPU}}
 	height := updateInfoView(view, state)
 	text := view.GetText(false)
 	if height <= 0 {
 		t.Fatalf("Expected positive info view height, got %d", height)
 	}
-	if !strings.Contains(text, "top inside a container") || !strings.Contains(text, "Quit: q") {
-		t.Fatalf("Info view text missing expected content: %q", text)
+	if strings.Contains(text, "░████") {
+		t.Fatalf("Default compact info view should not show ASCII art: %q", text)
+	}
+	if !strings.Contains(text, "top inside a container") || !strings.Contains(text, "Keys: q quit") {
+		t.Fatalf("Compact info view text missing expected content: %q", text)
+	}
+	if height > 5 {
+		t.Fatalf("Compact info view should stay short, got height %d and text %q", height, text)
 	}
 
-	state.ui.HideASCIIArt = true
+	state.ui.HideASCIIArt = false
 	height = updateInfoView(view, state)
 	text = view.GetText(false)
 	if height <= 0 {
-		t.Fatalf("Expected positive compact info view height, got %d", height)
+		t.Fatalf("Expected positive ASCII info view height, got %d", height)
 	}
-	if strings.Contains(text, "░████") || !strings.Contains(text, "ASCII: a") {
-		t.Fatalf("Compact info view did not hide ASCII art or show toggle help: %q", text)
+	if !strings.Contains(text, "░████") || !strings.Contains(text, "Logo: a") {
+		t.Fatalf("ASCII info view did not show logo or toggle help: %q", text)
+	}
+}
+
+func TestCompactInfoPanelLeavesProcessTableSpace(t *testing.T) {
+	state := &State{
+		static: StaticInfo{
+			ContainerCPULimit:      12,
+			ContainerMemLimitBytes: 30 * bytesPerGB,
+			ContainerMemLimitGB:    30,
+			HostCores:              12,
+			GPUCount:               1,
+			GPUTotalGB:             []float64{16},
+		},
+		ui: UIState{HideASCIIArt: true, ProcessSort: SortByCPU},
+		dynamic: DynamicInfo{
+			HostCPUUsage:       13.7,
+			ContainerMemUsedGB: 14.9,
+			StorageUsage: []StorageUsage{
+				{Path: "/", UsedGB: 296.14, FreeGB: 312.86, UsedPercent: 48.6},
+				{Path: "/boot/efi", UsedGB: 0.04, FreeGB: 0.15, UsedPercent: 19.4},
+			},
+			LiveGPUUsage: []GPUUsage{{Index: 0, Utilization: 6, MemUsedGB: 1.31}},
+			NetworkUsage: []NetworkUsage{
+				{
+					Name:          "enp11s0",
+					RXBytesPerSec: 0.10 * bytesPerSecondToMiBSecond,
+					TXBytesPerSec: 0.09 * bytesPerSecondToMiBSecond,
+				},
+			},
+			DiskIOUsage: []DiskIOUsage{
+				{
+					Name:             "nvme0n1p6",
+					ReadBytesPerSec:  154.72 * bytesPerSecondToMiBSecond,
+					WriteBytesPerSec: 13.92 * bytesPerSecondToMiBSecond,
+				},
+			},
+			Pressure:  []PressureStat{{Resource: "cpu"}},
+			Processes: []ProcessInfo{{PID: 1, User: "root", CPUPercent: 1, Command: "topic", GPUIndex: -1}},
+		},
+	}
+	for i := range historySize {
+		state.history.CPU.Add(float64(i))
+		state.history.Memory.Add(float64(i))
+		state.history.GPU.Add(float64(i))
+	}
+
+	resourceView := tview.NewTextView().SetDynamicColors(true).SetWrap(false)
+	infoView := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignLeft)
+	processTable := configureProcessTable(tview.NewTable())
+	topPanel := tview.NewFlex().
+		SetDirection(tview.FlexColumn).
+		AddItem(resourceView, 0, 1, false).
+		AddItem(infoView, compactInfoPanelWidth, 0, false)
+	topPanel.SetBorder(true).SetTitle(" System ")
+	mainLayout := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(topPanel, placeholderHeight, 0, false).
+		AddItem(processTable, 0, 1, true)
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	app := tview.NewApplication().SetScreen(screen).SetRoot(mainLayout, true)
+	screen.SetSize(200, 50)
+	leftHeight := updateResourceView(resourceView, state)
+	rightHeight := updateInfoView(infoView, state)
+	topPanel.ResizeItem(infoView, currentInfoPanelWidth(state), 0)
+	mainLayout.ResizeItem(topPanel, max(leftHeight, rightHeight)+borderHeight, 0)
+	updateProcessTable(processTable, state)
+	app.ForceDraw()
+
+	_, _, _, topHeight := topPanel.GetRect()
+	_, _, _, tableHeight := processTable.GetRect()
+	if topHeight > 14 {
+		t.Fatalf("Expected compact top panel height to stay at or below 14 rows, got %d", topHeight)
+	}
+	if tableHeight <= topHeight*2 {
+		t.Fatalf("Expected process table to get most of the viewport, top=%d table=%d", topHeight, tableHeight)
 	}
 }
 

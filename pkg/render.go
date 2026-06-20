@@ -105,14 +105,22 @@ func buildResourceText(availableWidth int, state *State) string {
 
 	// Build sections with unified layout and bar width
 	if len(storageBars) > 0 {
-		builder.WriteString(buildStorageSectionBars(sharedLayout, storageBars))
+		appendResourceSection(&builder, buildStorageSectionBars(sharedLayout, storageBars))
 	}
 	if len(gpuBars) > 0 {
-		builder.WriteString(buildGPUSectionBars(sharedLayout, gpuBars))
+		appendResourceSection(&builder, buildGPUSectionBars(sharedLayout, gpuBars))
 	}
-	builder.WriteString(buildMetricsSection(state, availableWidth))
+	appendResourceSection(&builder, buildMetricsSection(state, availableWidth))
 
 	return builder.String()
+}
+
+func appendResourceSection(builder *strings.Builder, section string) {
+	section = strings.TrimLeft(section, "\n")
+	if section == "" {
+		return
+	}
+	builder.WriteString(section)
 }
 
 // calculateCPULabelInfo calculates the CPU label, info text, and usage percentage.

@@ -2,19 +2,22 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
 // --- Constants ---
 
 const (
-	infoPanelWidth            = 55                // Fixed size of the information panel
+	compactInfoPanelWidth     = 48                // Fixed compact width of the information panel
+	asciiInfoPanelWidth       = 55                // Fixed width needed for the ASCII art panel
 	placeholderHeight         = 10                // Initial height of the top panel
 	borderHeight              = 2                 // Border height for boxes
 	minCPUInfoCount           = 2                 // For cgroup CPU quota/period
@@ -130,21 +133,17 @@ func main() {
 		SetTextAlign(tview.AlignLeft)
 
 	// Bottom panel for processes
-	processTable := tview.NewTable().
-		SetSelectable(true, false).
-		SetFixed(1, 0).
-		SetSeparator(tview.Borders.Vertical)
-	processTable.SetBorder(true).SetTitle(" Processes ")
+	processTable := configureProcessTable(tview.NewTable())
 
 	// --- Create the Layout ---
 
 	// Top panel combines resources (left) and info (right)
 	topPanel := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
-		AddItem(resourceView, 0, 1, false).         // Resources take up remaining width
-		AddItem(infoView, infoPanelWidth, 0, false) // Info panel has a fixed width
+		AddItem(resourceView, 0, 1, false).                // Resources take up remaining width
+		AddItem(infoView, compactInfoPanelWidth, 0, false) // Info panel has a fixed width
 
-	topPanel.SetBorder(true).SetTitle(" System Information ")
+	topPanel.SetBorder(true).SetTitle(" System ")
 
 	// Main layout combines top panel and process table
 	mainLayout := tview.NewFlex().
@@ -156,6 +155,7 @@ func main() {
 	render := func() {
 		leftHeight := updateResourceView(resourceView, state)
 		rightHeight := updateInfoView(infoView, state)
+		topPanel.ResizeItem(infoView, currentInfoPanelWidth(state), 0)
 		topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
 		mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
 		updateProcessTable(processTable, state)
@@ -185,6 +185,15 @@ func main() {
 	}
 }
 
+func configureProcessTable(table *tview.Table) *tview.Table {
+	table.SetSelectable(true, false).
+		SetFixed(1, 0).
+		SetSeparator(tview.Borders.Vertical).
+		SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorDarkCyan).Bold(true))
+	table.SetBorder(true).SetTitle(" Processes ")
+	return table
+}
+
 // --- UI Update Functions ---
 
 // updateInfoView updates the info view with ASCII art and navigation guide.
@@ -194,18 +203,7 @@ func updateInfoView(view *tview.TextView, state *State) int {
 	state.dynamic.mu.Unlock()
 
 	if ui.HideASCIIArt {
-		fullText := `[::b]topic
-[darkgrey]top inside a container
-` + integrationStatusText(state.static.Integrations) + `
-
-[darkgrey]Quit: q, Ctrl+C
-[darkgrey]Sort mode: s  Reverse: r
-[darkgrey]Filter mode: /  Clear: Ctrl+U
-[darkgrey]Pause: p  Tree: t  ASCII: a
-[darkgrey]Details: Enter  Signal: k
-[darkgrey]Help: ?
-[darkgrey]Navigate: ←↑→↓ / Mouse
-`
+		fullText := compactInfoText(ui, state.static.Integrations)
 		view.SetText(fullText)
 		return strings.Count(fullText, "\n")
 	}
@@ -227,7 +225,7 @@ func updateInfoView(view *tview.TextView, state *State) int {
 [darkgrey]      Quit: q, Ctrl+C
 [darkgrey] Sort mode: s  Reverse: r
 [darkgrey]Filter mode: /  Clear: Ctrl+U
-[darkgrey]     Pause: p  Tree: t  ASCII: a
+[darkgrey]     Pause: p  Tree: t  Logo: a
 [darkgrey]   Details: Enter  Signal: k
 [darkgrey]      Help: ?
 [darkgrey]  Navigate: ←↑→↓ / Mouse
@@ -236,6 +234,87 @@ func updateInfoView(view *tview.TextView, state *State) int {
 	fullText := asciiArt + subTitle + guide
 	view.SetText(fullText)
 	return strings.Count(fullText, "\n")
+}
+
+func currentInfoPanelWidth(state *State) int {
+	state.dynamic.mu.Lock()
+	hideASCII := state.ui.HideASCIIArt
+	state.dynamic.mu.Unlock()
+	if hideASCII {
+		return compactInfoPanelWidth
+	}
+	return asciiInfoPanelWidth
+}
+
+func compactInfoText(ui UIState, statuses []IntegrationStatus) string {
+	integrations := strings.TrimSpace(integrationStatusText(statuses))
+	if integrations == "" {
+		integrations = "[darkgrey]Integrations: none"
+	}
+	return fmt.Sprintf(
+		"[::b]topic[white] [darkgrey]top inside a container\n"+
+			"[darkgrey]Mode: %s  [darkgrey]Sort: [yellow]%s[darkgrey]  Filter: %s\n"+
+			"%s\n"+
+			"[darkgrey]Keys: q quit  / filter  s sort  p pause  t tree  Enter details  ? help  a logo\n",
+		infoModeText(ui),
+		sortStatusText(ui),
+		filterStatusText(ui),
+		integrations,
+	)
+}
+
+func infoModeText(ui UIState) string {
+	switch {
+	case ui.SearchMode:
+		return "[yellow]filter[white]"
+	case ui.SortMode:
+		return "[yellow]sort[white]"
+	case ui.Paused:
+		return "[yellow]paused[white]"
+	default:
+		return "[green]live[white]"
+	}
+}
+
+func filterStatusText(ui UIState) string {
+	if ui.ProcessFilter == "" {
+		return "[darkgrey]-"
+	}
+	filter := ui.ProcessFilter
+	const maxFilterStatusWidth = 14
+	if len([]rune(filter)) > maxFilterStatusWidth {
+		filter = string([]rune(filter)[:maxFilterStatusWidth-1]) + "…"
+	}
+	return "[yellow]" + filter + "[white]"
+}
+
+func sortStatusText(ui UIState) string {
+	direction := "↓"
+	if ui.ReverseSort {
+		direction = "↑"
+	}
+	return processSortColumnLabel(ui.ProcessSort) + direction
+}
+
+func processSortColumnLabel(column ProcessSortColumn) string {
+	switch column {
+	case SortByMemory:
+		return processMemoryLabel
+	case SortByGPU:
+		return processGPULabel
+	case SortByGPUMemory:
+		return processGPUMemoryLabel
+	case SortByPID:
+		return processPIDLabel
+	case SortByUser:
+		return processUserLabel
+	case SortByCommand:
+		return processCommandLabel
+	case SortByCPU:
+		fallthrough
+	default:
+		return processCPULabel
+	}
 }
 
 func integrationStatusText(statuses []IntegrationStatus) string {
