@@ -36,6 +36,15 @@ test:
 	@echo "Running tests..."
 	(cd $(MODULE_PATH) && $(GOTEST) -coverprofile=coverage.out ./...)
 
+bench:
+	@echo "Running benchmarks..."
+	(cd $(MODULE_PATH) && $(GOTEST) -bench=. -benchmem -count=5 ./...)
+
+bench-save:
+	@echo "Running benchmarks and saving output under tmp/benchmarks..."
+	@mkdir -p tmp/benchmarks
+	(cd $(MODULE_PATH) && $(GOTEST) -bench=. -benchmem -count=5 ./...) | tee tmp/benchmarks/$$(git rev-parse --short HEAD)-$$(date +%Y%m%d%H%M%S).txt
+
 view-coverage:
 	@echo "==> Opening coverage report in browser..."
 	(cd $(MODULE_PATH) && go tool cover -html=coverage.out)
@@ -64,10 +73,12 @@ help:
 	@echo "  build    Build the application binary"
 	@echo "  run      Run the application"
 	@echo "  test     Run all tests"
+	@echo "  bench    Run benchmarks"
+	@echo "  bench-save Run benchmarks and save output in tmp/benchmarks"
 	@echo "  lint     Lint the source code"
 	@echo "  deps     Tidy and vendor dependencies"
 	@echo "  clean    Remove build artifacts"
 	@echo "  help     Show this help message"
 	@echo ""
 
-.PHONY: all build run clean test deps lint help
+.PHONY: all build run clean test bench bench-save deps lint help

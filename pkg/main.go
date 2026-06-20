@@ -166,9 +166,11 @@ type BarLayout struct {
 
 // BarData holds information for rendering a single bar.
 type BarData struct {
-	Label   string  // Left side label
-	Percent float64 // Percentage for the bar
-	Info    string  // Right side info text
+	Label      string  // Left side label
+	LabelWidth int     // Visible width of the label
+	Percent    float64 // Percentage for the bar
+	Info       string  // Right side info text
+	InfoWidth  int     // Visible width of the info text
 }
 
 // GPUProcessInfo holds usage data for a process on a GPU.
@@ -339,6 +341,12 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	_, _, availableWidth, _ := view.GetInnerRect()
 	availableWidth -= borderHeight // Account for horizontal padding within the box
 
+	finalText := buildResourceText(availableWidth, state)
+	view.SetText(finalText)
+	return strings.Count(finalText, "\n")
+}
+
+func buildResourceText(availableWidth int, state *State) string {
 	var builder strings.Builder
 
 	cpuLabel, cpuInfo, cpuUsage := calculateCPULabelInfo(state)
@@ -347,30 +355,28 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	builder.WriteString(buildCPUSection(cpuMemBarWidth, cpuLabel, cpuInfo, cpuUsage))
 	builder.WriteString(buildMemorySection(cpuMemBarWidth, memLabel, memInfo, memPercent))
 
-	// Calculate unified bar width for DISK and GPU sections
-	var diskGPULabels []string
-	var diskGPUInfos []string
-	var diskPercentages []float64
-	var gpuPercentages []float64
+	// Calculate unified bar width for DISK and GPU sections.
+	var storageBars []BarData
+	var gpuBars []BarData
+	var diskGPUBars []BarData
 
 	if len(state.dynamic.StorageUsage) > 0 {
-		diskGPULabels, diskGPUInfos, diskPercentages = calculateStorageLabelsInfo(state)
+		storageBars = calculateStorageBars(state)
+		diskGPUBars = append(diskGPUBars, storageBars...)
 	}
 	if state.static.GPUCount > 0 {
-		gpuLabels, gpuInfos, gpuPercents := calculateGPULabelsInfo(state)
-		diskGPULabels = append(diskGPULabels, gpuLabels...)
-		diskGPUInfos = append(diskGPUInfos, gpuInfos...)
-		gpuPercentages = gpuPercents
+		gpuBars = calculateGPUBars(state)
+		diskGPUBars = append(diskGPUBars, gpuBars...)
 	}
 
 	// Determine if DISK/GPU should use multi-column layout
 	var sharedLayout BarLayout
-	if len(diskGPULabels) > 0 {
+	if len(diskGPUBars) > 0 {
 		// Calculate unified max widths from all combined labels and infos for proper alignment
-		maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromSlices(diskGPULabels, diskGPUInfos)
+		maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromBars(diskGPUBars)
 
 		// Determine the layout for all DISK/GPU entries combined
-		totalEntries := len(diskGPULabels)
+		totalEntries := len(diskGPUBars)
 		maxColumns := maxDiskColumns
 		if totalEntries == 1 {
 			maxColumns = 1
@@ -381,7 +387,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 			// Single column layout
 			sharedLayout = BarLayout{
 				Columns:       1,
-				BarWidth:      calculateBarWidth(availableWidth, diskGPULabels, diskGPUInfos),
+				BarWidth:      calculateBarWidthFromBars(availableWidth, diskGPUBars),
 				TotalWidth:    availableWidth,
 				MaxLabelWidth: maxLabelWidth,
 				MaxInfoWidth:  maxInfoWidth,
@@ -399,7 +405,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 				// Not enough space for multi-column, force single column
 				sharedLayout = BarLayout{
 					Columns:       1,
-					BarWidth:      calculateBarWidth(availableWidth, diskGPULabels, diskGPUInfos),
+					BarWidth:      calculateBarWidthFromBars(availableWidth, diskGPUBars),
 					TotalWidth:    availableWidth,
 					MaxLabelWidth: maxLabelWidth,
 					MaxInfoWidth:  maxInfoWidth,
@@ -407,7 +413,7 @@ func updateResourceView(view *tview.TextView, state *State) int {
 			} else {
 				// We can fit multi-column layout
 				widthPerColumn := availableContentWidth / maxColumns
-				barWidth := calculateBarWidth(widthPerColumn, diskGPULabels, diskGPUInfos)
+				barWidth := calculateBarWidthFromBars(widthPerColumn, diskGPUBars)
 				totalWidth := maxColumns*widthPerColumn + spacingWidth
 
 				sharedLayout = BarLayout{
@@ -422,24 +428,14 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	}
 
 	// Build sections with unified layout and bar width
-	if len(state.dynamic.StorageUsage) > 0 {
-		builder.WriteString(buildStorageSection(
-			sharedLayout,
-			diskGPULabels[:len(diskPercentages)],
-			diskGPUInfos[:len(diskPercentages)],
-			diskPercentages),
-		)
+	if len(storageBars) > 0 {
+		builder.WriteString(buildStorageSectionBars(sharedLayout, storageBars))
 	}
-	if state.static.GPUCount > 0 {
-		gpuStartIndex := len(diskPercentages)
-		gpuLabels := diskGPULabels[gpuStartIndex:]
-		gpuInfos := diskGPUInfos[gpuStartIndex:]
-		builder.WriteString(buildGPUSection(sharedLayout, gpuLabels, gpuInfos, gpuPercentages))
+	if len(gpuBars) > 0 {
+		builder.WriteString(buildGPUSectionBars(sharedLayout, gpuBars))
 	}
 
-	finalText := builder.String()
-	view.SetText(finalText)
-	return strings.Count(finalText, "\n")
+	return builder.String()
 }
 
 // calculateCPULabelInfo calculates the CPU label, info text, and usage percentage.
@@ -516,11 +512,32 @@ func calculateBarWidth(availableWidth int, labels []string, infos []string) int 
 	return barWidth
 }
 
+func calculateBarWidthFromBars(availableWidth int, bars []BarData) int {
+	maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromBars(bars)
+	barWidth := availableWidth - maxLabelWidth - maxInfoWidth
+	if barWidth < minBarWidth {
+		barWidth = minBarWidth
+	}
+	return barWidth
+}
+
+func newBarData(label string, percent float64, info string) BarData {
+	return BarData{
+		Label:      label,
+		LabelWidth: tview.TaggedStringWidth(label),
+		Percent:    percent,
+		Info:       info,
+		InfoWidth:  tview.TaggedStringWidth(info),
+	}
+}
+
 // calculateStorageLabelsInfo calculates all storage labels, info texts, and percentages.
 func calculateStorageLabelsInfo(state *State) ([]string, []string, []float64) {
-	labels := make([]string, 0, len(state.dynamic.StorageUsage))
-	infos := make([]string, 0, len(state.dynamic.StorageUsage))
-	percentages := make([]float64, 0, len(state.dynamic.StorageUsage))
+	return barsToSlices(calculateStorageBars(state))
+}
+
+func calculateStorageBars(state *State) []BarData {
+	bars := make([]BarData, 0, len(state.dynamic.StorageUsage))
 	for _, storage := range state.dynamic.StorageUsage {
 		// Shorten long mount paths for display
 		displayPath := storage.Path
@@ -535,27 +552,25 @@ func calculateStorageLabelsInfo(state *State) ([]string, []string, []float64) {
 
 		info := fmt.Sprintf("[darkcyan]%.2f GB / %.2f GB[white]", storage.UsedGB, storage.UsedGB+storage.FreeGB)
 
-		labels = append(labels, formattedLabel)
-		infos = append(infos, info)
-		percentages = append(percentages, storage.UsedPercent)
+		bars = append(bars, newBarData(formattedLabel, storage.UsedPercent, info))
 	}
-	return labels, infos, percentages
+	return bars
 }
 
 // calculateGPULabelsInfo calculates all GPU labels, info texts, and percentages.
 func calculateGPULabelsInfo(state *State) ([]string, []string, []float64) {
-	labels := make([]string, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
-	infos := make([]string, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
-	percentages := make([]float64, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
+	return barsToSlices(calculateGPUBars(state))
+}
+
+func calculateGPUBars(state *State) []BarData {
+	bars := make([]BarData, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
 	for i, gpu := range state.dynamic.LiveGPUUsage {
 		// GPU Utilization - Format as: "GPU0 Util:" with right-aligned percentage
 		utilLabel := fmt.Sprintf("GPU%d Util:", i)
 		utilPercentage := fmt.Sprintf("%5d%%", gpu.Utilization)
 		formattedUtilLabel := fmt.Sprintf("%-*s[yellow]%s[white]", minLabelWidth, utilLabel, utilPercentage)
 
-		labels = append(labels, formattedUtilLabel)
-		infos = append(infos, "") // No info for utilization
-		percentages = append(percentages, float64(gpu.Utilization))
+		bars = append(bars, newBarData(formattedUtilLabel, float64(gpu.Utilization), ""))
 
 		// GPU Memory - Format as: "GPU0 Mem:" with right-aligned percentage
 		gpuMemPercent := 0.0
@@ -571,11 +586,29 @@ func calculateGPULabelsInfo(state *State) ([]string, []string, []float64) {
 			memInfo = fmt.Sprintf("[darkcyan]%.2f GB / %.2f GB[white]", gpu.MemUsedGB, state.static.GPUTotalGB[i])
 		}
 
-		labels = append(labels, formattedMemLabel)
-		infos = append(infos, memInfo)
-		percentages = append(percentages, gpuMemPercent)
+		bars = append(bars, newBarData(formattedMemLabel, gpuMemPercent, memInfo))
+	}
+	return bars
+}
+
+func barsToSlices(bars []BarData) ([]string, []string, []float64) {
+	labels := make([]string, 0, len(bars))
+	infos := make([]string, 0, len(bars))
+	percentages := make([]float64, 0, len(bars))
+	for _, bar := range bars {
+		labels = append(labels, bar.Label)
+		infos = append(infos, bar.Info)
+		percentages = append(percentages, bar.Percent)
 	}
 	return labels, infos, percentages
+}
+
+func slicesToBars(labels []string, infos []string, percentages []float64) []BarData {
+	bars := make([]BarData, 0, len(labels))
+	for i := range labels {
+		bars = append(bars, newBarData(labels[i], percentages[i], infos[i]))
+	}
+	return bars
 }
 
 // buildCPUSection creates the CPU usage display section.
@@ -590,29 +623,37 @@ func buildMemorySection(barWidth int, memLabel string, memInfo string, memPercen
 
 // buildStorageSection creates the storage usage display section.
 func buildStorageSection(layout BarLayout, labels []string, infos []string, percentages []float64) string {
-	return buildBarSection(layout, labels, infos, percentages)
+	return buildBarSection(layout, slicesToBars(labels, infos, percentages))
+}
+
+func buildStorageSectionBars(layout BarLayout, bars []BarData) string {
+	return buildBarSection(layout, bars)
 }
 
 // buildGPUSection creates the GPU usage display section.
 func buildGPUSection(layout BarLayout, labels []string, infos []string, percentages []float64) string {
-	return buildBarSection(layout, labels, infos, percentages)
+	return buildBarSection(layout, slicesToBars(labels, infos, percentages))
 }
 
-func buildBarSection(layout BarLayout, labels []string, infos []string, percentages []float64) string {
+func buildGPUSectionBars(layout BarLayout, bars []BarData) string {
+	return buildBarSection(layout, bars)
+}
+
+func buildBarSection(layout BarLayout, bars []BarData) string {
 	var builder strings.Builder
 	builder.WriteString("\n")
 
-	if len(labels) == 0 {
+	if len(bars) == 0 {
 		return builder.String()
 	}
 
 	// Use the pre-calculated layout from updateResourceView
 	if layout.Columns == 1 {
-		for i := range labels {
-			builder.WriteString(labels[i] + " " + makeBar(percentages[i], layout.BarWidth) + " " + infos[i] + "\n")
+		for _, bar := range bars {
+			builder.WriteString(bar.Label + " " + makeBar(bar.Percent, layout.BarWidth) + " " + bar.Info + "\n")
 		}
 	} else {
-		barRows := makeAlignedMultiColumnBarsFromSlices(labels, infos, percentages, layout)
+		barRows := makeAlignedMultiColumnBars(bars, layout)
 		for _, row := range barRows {
 			builder.WriteString(row + "\n")
 		}
@@ -687,30 +728,7 @@ func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 	if len(bars) == 0 {
 		return nil
 	}
-
-	labels := make([]string, 0, len(bars))
-	infos := make([]string, 0, len(bars))
-	percentages := make([]float64, 0, len(bars))
-	for _, bar := range bars {
-		labels = append(labels, bar.Label)
-		infos = append(infos, bar.Info)
-		percentages = append(percentages, bar.Percent)
-	}
-
-	return makeAlignedMultiColumnBarsFromSlices(labels, infos, percentages, layout)
-}
-
-func makeAlignedMultiColumnBarsFromSlices(
-	labels []string,
-	infos []string,
-	percentages []float64,
-	layout BarLayout,
-) []string {
-	if len(labels) == 0 {
-		return nil
-	}
-
-	numRows := (len(labels) + layout.Columns - 1) / layout.Columns
+	numRows := (len(bars) + layout.Columns - 1) / layout.Columns
 
 	// Use the unified max widths from layout for consistent alignment across sections
 	maxLabelWidth := layout.MaxLabelWidth
@@ -722,7 +740,7 @@ func makeAlignedMultiColumnBarsFromSlices(
 
 	result := make([]string, 0, numRows)
 	for row := range numRows {
-		rowContent := buildAlignedRowFromSlices(labels, infos, percentages, BarLayout{
+		rowContent := buildAlignedRow(bars, BarLayout{
 			Columns:    layout.Columns,
 			BarWidth:   actualBarWidth,
 			TotalWidth: layout.TotalWidth,
@@ -755,10 +773,40 @@ func calculateMaxWidthsFromSlices(labels []string, infos []string) (int, int) {
 	return maxLabelWidth, maxInfoWidth
 }
 
-func buildAlignedRowFromSlices(
-	labels []string,
-	infos []string,
-	percentages []float64,
+func calculateMaxWidthsFromBars(bars []BarData) (int, int) {
+	maxLabelWidth := 0
+	maxInfoWidth := 0
+
+	for _, bar := range bars {
+		labelWidth := barLabelWidth(bar)
+		if labelWidth > maxLabelWidth {
+			maxLabelWidth = labelWidth
+		}
+		infoWidth := barInfoWidth(bar)
+		if infoWidth > maxInfoWidth {
+			maxInfoWidth = infoWidth
+		}
+	}
+
+	return maxLabelWidth, maxInfoWidth
+}
+
+func barLabelWidth(bar BarData) int {
+	if bar.LabelWidth > 0 {
+		return bar.LabelWidth
+	}
+	return tview.TaggedStringWidth(bar.Label)
+}
+
+func barInfoWidth(bar BarData) int {
+	if bar.InfoWidth > 0 || bar.Info == "" {
+		return bar.InfoWidth
+	}
+	return tview.TaggedStringWidth(bar.Info)
+}
+
+func buildAlignedRow(
+	bars []BarData,
 	layout BarLayout,
 	row int,
 	maxLabelWidth int,
@@ -777,16 +825,14 @@ func buildAlignedRowFromSlices(
 		}
 
 		barIndex := row*layout.Columns + col
-		if barIndex >= len(labels) {
+		if barIndex >= len(bars) {
 			// Fill empty columns with spaces to maintain alignment
 			builder.WriteString(strings.Repeat(" ", columnWidth))
 			continue
 		}
 
-		builder.WriteString(formatAlignedBarParts(
-			labels[barIndex],
-			percentages[barIndex],
-			infos[barIndex],
+		builder.WriteString(formatAlignedBar(
+			bars[barIndex],
 			layout.BarWidth,
 			maxLabelWidth,
 			maxInfoWidth,
@@ -797,29 +843,21 @@ func buildAlignedRowFromSlices(
 	return builder.String()
 }
 
-func formatAlignedBarParts(
-	label string,
-	percent float64,
-	info string,
-	barWidth int,
-	maxLabelWidth int,
-	maxInfoWidth int,
-	columnWidth int,
-) string {
+func formatAlignedBar(bar BarData, barWidth int, maxLabelWidth int, maxInfoWidth int, columnWidth int) string {
 	// Pad label to consistent width for alignment
-	paddedLabel := label
-	labelPadding := maxLabelWidth - tview.TaggedStringWidth(label)
+	paddedLabel := bar.Label
+	labelPadding := maxLabelWidth - barLabelWidth(bar)
 	if labelPadding > 0 {
 		paddedLabel += strings.Repeat(" ", labelPadding)
 	}
 
 	// Create the bar with consistent width
-	barContent := makeBar(percent, barWidth)
+	barContent := makeBar(bar.Percent, barWidth)
 
 	// Pad info to consistent width (if info exists)
-	if info != "" {
-		paddedInfo := info
-		infoPadding := maxInfoWidth - tview.TaggedStringWidth(info)
+	if bar.Info != "" {
+		paddedInfo := bar.Info
+		infoPadding := maxInfoWidth - barInfoWidth(bar)
 		if infoPadding > 0 {
 			paddedInfo += strings.Repeat(" ", infoPadding)
 		}
@@ -861,8 +899,17 @@ func makeBar(percent float64, barWidth int) string {
 	}
 
 	// Use characters that provide better visual separation between bars
-	bar := strings.Repeat("▓", filledWidth) + strings.Repeat("░", barWidth-filledWidth)
-	return "[green]" + bar + "[white]"
+	var builder strings.Builder
+	builder.Grow(len("[green]") + len("[white]") + barWidth*len("▓"))
+	builder.WriteString("[green]")
+	for range filledWidth {
+		builder.WriteString("▓")
+	}
+	for range barWidth - filledWidth {
+		builder.WriteString("░")
+	}
+	builder.WriteString("[white]")
+	return builder.String()
 }
 
 // --- Host System Functions ---

@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/rivo/tview"
+)
 
 func BenchmarkMakeBar(b *testing.B) {
 	for range b.N {
@@ -26,6 +30,40 @@ func BenchmarkCalculateBarWidth(b *testing.B) {
 }
 
 func BenchmarkBuildStorageSection(b *testing.B) {
+	layout, labels, infos, percentages := storageSectionBenchmarkFixture()
+
+	for range b.N {
+		_ = buildStorageSection(layout, labels, infos, percentages)
+	}
+}
+
+func BenchmarkBuildStorageSectionBars(b *testing.B) {
+	layout, labels, infos, percentages := storageSectionBenchmarkFixture()
+	bars := slicesToBars(labels, infos, percentages)
+
+	for range b.N {
+		_ = buildStorageSectionBars(layout, bars)
+	}
+}
+
+func BenchmarkBuildResourceText(b *testing.B) {
+	state := resourceBenchmarkState()
+
+	for range b.N {
+		_ = buildResourceText(180, state)
+	}
+}
+
+func BenchmarkUpdateProcessTable(b *testing.B) {
+	state := resourceBenchmarkState()
+	table := tview.NewTable()
+
+	for range b.N {
+		updateProcessTable(table, state)
+	}
+}
+
+func storageSectionBenchmarkFixture() (BarLayout, []string, []string, []float64) {
 	labels := []string{
 		"DISK /:        [yellow] 38.2%[white]",
 		"DISK /data:    [yellow] 71.4%[white]",
@@ -48,9 +86,58 @@ func BenchmarkBuildStorageSection(b *testing.B) {
 		MaxInfoWidth:  maxInfoWidth,
 	}
 
-	for range b.N {
-		_ = buildStorageSection(layout, labels, infos, percentages)
+	return layout, labels, infos, percentages
+}
+
+func resourceBenchmarkState() *State {
+	return &State{
+		static: StaticInfo{
+			ContainerCPULimit:      4,
+			ContainerMemLimitBytes: 8 * bytesPerGB,
+			ContainerMemLimitGB:    8,
+			HostCores:              16,
+			HostMemTotalGB:         64,
+			GPUCount:               2,
+			GPUTotalGB:             []float64{24, 24},
+		},
+		dynamic: DynamicInfo{
+			ContainerCPUUsage:  72.5,
+			ContainerMemUsedGB: 3.75,
+			HostCPUUsage:       19,
+			HostMemUsedGB:      22,
+			LiveGPUUsage: []GPUUsage{
+				{Index: 0, Utilization: 68, MemUsedGB: 12},
+				{Index: 1, Utilization: 31, MemUsedGB: 4},
+			},
+			StorageUsage: []StorageUsage{
+				{Path: "/", UsedGB: 38.2, FreeGB: 61.8, UsedPercent: 38.2},
+				{Path: "/data", UsedGB: 71.4, FreeGB: 28.6, UsedPercent: 71.4},
+				{Path: "/logs", UsedGB: 12.9, FreeGB: 87.1, UsedPercent: 12.9},
+				{Path: "/cache", UsedGB: 55, FreeGB: 45, UsedPercent: 55},
+			},
+			Processes: benchmarkProcesses(100),
+		},
 	}
+}
+
+func benchmarkProcesses(count int) []ProcessInfo {
+	processes := make([]ProcessInfo, 0, count)
+	for i := range count {
+		processes = append(processes, ProcessInfo{
+			PID:           int32(1000 + i),
+			User:          "worker",
+			CPUPercent:    float64(i % 100),
+			MemPercent:    float64(i%50) / 2,
+			Command:       "python train.py --batch-size 32 --worker",
+			GPUIndex:      -1,
+			GPUUtil:       uint64(i % 100),
+			GPUMemPercent: float64(i % 80),
+		})
+		if i%3 == 0 {
+			processes[i].GPUIndex = i % 2
+		}
+	}
+	return processes
 }
 
 func BenchmarkGetGPUProcessMap(b *testing.B) {
