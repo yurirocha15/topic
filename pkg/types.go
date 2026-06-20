@@ -87,6 +87,30 @@ type ProcessInfo struct {
 	GPUMemPercent float64
 }
 
+type ProcessSortColumn int
+
+const (
+	SortByCPU ProcessSortColumn = iota
+	SortByMemory
+	SortByGPU
+	SortByGPUMemory
+	SortByPID
+	SortByUser
+	SortByCommand
+)
+
+// UIState holds interactive view preferences.
+type UIState struct {
+	ProcessSort   ProcessSortColumn
+	ReverseSort   bool
+	ProcessFilter string
+	SearchMode    bool
+	Paused        bool
+	TreeMode      bool
+	SelectedPID   int32
+	HideASCIIArt  bool
+}
+
 // DynamicInfo holds all the data that is refreshed on each tick.
 type DynamicInfo struct {
 	mu                 sync.Mutex
@@ -123,6 +147,7 @@ type DynamicCollectorSet struct {
 type State struct {
 	static       StaticInfo
 	dynamic      DynamicInfo
+	ui           UIState
 	prevCPUUsage uint64
 	prevCPUTime  time.Time
 }

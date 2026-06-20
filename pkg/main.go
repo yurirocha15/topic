@@ -2,6 +2,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"math"
 	"strings"
@@ -69,6 +70,9 @@ const (
 // --- Main Application ---
 
 func main() {
+	hideASCII := flag.Bool("no-ascii", false, "hide the ASCII art panel")
+	flag.Parse()
+
 	fileReader := OSFileReader{}
 	cmdRunner := OSCommandRunner{Timeout: commandTimeout}
 	stater := OSStater{}
@@ -81,6 +85,7 @@ func main() {
 	state := &State{
 		static:      staticInfo,
 		dynamic:     DynamicInfo{},
+		ui:          UIState{ProcessSort: SortByCPU, HideASCIIArt: *hideASCII},
 		prevCPUTime: time.Now(),
 	}
 
@@ -127,11 +132,13 @@ func main() {
 		defer ticker.Stop()
 		for {
 			<-ticker.C
-			updateAll(state, fileReader, cmdRunner)
+			if !isPaused(state) {
+				updateAll(state, fileReader, cmdRunner)
+			}
 			app.QueueUpdateDraw(func() {
 				// Update all components and dynamically resize the top panel
 				leftHeight := updateResourceView(resourceView, state)
-				rightHeight := updateInfoView(infoView)
+				rightHeight := updateInfoView(infoView, state)
 				topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
 				mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
 				updateProcessTable(processTable, state)
@@ -140,16 +147,13 @@ func main() {
 	}()
 
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Rune() == 'q' || event.Key() == tcell.KeyCtrlC {
-			app.Stop()
-		}
-		return event
+		return handleInput(event, state, app)
 	})
 
 	// Initial data load and draw
 	updateAll(state, fileReader, cmdRunner)
 	leftHeight := updateResourceView(resourceView, state)
-	rightHeight := updateInfoView(infoView)
+	rightHeight := updateInfoView(infoView, state)
 	topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
 	mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
 	updateProcessTable(processTable, state)
@@ -162,7 +166,25 @@ func main() {
 // --- UI Update Functions ---
 
 // updateInfoView updates the info view with ASCII art and navigation guide.
-func updateInfoView(view *tview.TextView) int {
+func updateInfoView(view *tview.TextView, state *State) int {
+	state.dynamic.mu.Lock()
+	ui := state.ui
+	state.dynamic.mu.Unlock()
+
+	if ui.HideASCIIArt {
+		fullText := `[::b]topic
+[darkgrey]top inside a container
+
+[darkgrey]Quit: q, Ctrl+C
+[darkgrey]Sort: s  Reverse: r
+[darkgrey]Filter: /  Clear: Esc
+[darkgrey]Pause: p  ASCII: a
+[darkgrey]Navigate: ←↑→↓ / Mouse
+`
+		view.SetText(fullText)
+		return strings.Count(fullText, "\n")
+	}
+
 	asciiArt := `
 [yellow] ░██████████  ░██████   ░█████████  ░██████  ░██████  
 [yellow]     ░██     ░██   ░██  ░██     ░██   ░██   ░██   ░██ 
@@ -176,6 +198,9 @@ func updateInfoView(view *tview.TextView) int {
 	guide := `
 
 [darkgrey]      Quit: q, Ctrl+C
+[darkgrey]      Sort: s  Reverse: r
+[darkgrey]    Filter: /  Clear: Esc
+[darkgrey]     Pause: p  ASCII: a
 [darkgrey]  Navigate: ←↑→↓ / Mouse
 [darkgrey]                        `
 

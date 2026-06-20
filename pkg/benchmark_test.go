@@ -63,6 +63,19 @@ func BenchmarkUpdateProcessTable(b *testing.B) {
 	}
 }
 
+func BenchmarkPrepareProcessRowsFilterSort(b *testing.B) {
+	processes := benchmarkProcesses(500)
+	ui := UIState{
+		ProcessSort:   SortByMemory,
+		ReverseSort:   true,
+		ProcessFilter: "python",
+	}
+
+	for range b.N {
+		_ = prepareProcessRows(append([]ProcessInfo(nil), processes...), ui)
+	}
+}
+
 func BenchmarkUpdateProcessListWithProvider(b *testing.B) {
 	staticInfo := &StaticInfo{
 		ContainerCPULimit:      4,

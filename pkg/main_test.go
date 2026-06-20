@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -396,13 +397,24 @@ func TestBuildCPUAndMemorySections(t *testing.T) {
 
 func TestUpdateInfoView(t *testing.T) {
 	view := tview.NewTextView()
-	height := updateInfoView(view)
+	state := &State{}
+	height := updateInfoView(view, state)
 	text := view.GetText(false)
 	if height <= 0 {
 		t.Fatalf("Expected positive info view height, got %d", height)
 	}
 	if !strings.Contains(text, "top inside a container") || !strings.Contains(text, "Quit: q") {
 		t.Fatalf("Info view text missing expected content: %q", text)
+	}
+
+	state.ui.HideASCIIArt = true
+	height = updateInfoView(view, state)
+	text = view.GetText(false)
+	if height <= 0 {
+		t.Fatalf("Expected positive compact info view height, got %d", height)
+	}
+	if strings.Contains(text, "░████") || !strings.Contains(text, "ASCII: a") {
+		t.Fatalf("Compact info view did not hide ASCII art or show toggle help: %q", text)
 	}
 }
 
@@ -424,6 +436,7 @@ func TestUpdateProcessTable(t *testing.T) {
 				},
 			},
 		},
+		ui: UIState{ProcessSort: SortByCPU},
 	}
 
 	updateProcessTable(table, state)
@@ -444,6 +457,65 @@ func TestUpdateProcessTable(t *testing.T) {
 	updateProcessTable(table, state)
 	if rows := table.GetRowCount(); rows != 2 {
 		t.Fatalf("Expected stale process rows to be removed, got %d rows", rows)
+	}
+}
+
+func TestPrepareProcessRowsSortFilterReverse(t *testing.T) {
+	processes := []ProcessInfo{
+		{PID: 100, User: "alice", CPUPercent: 10, MemPercent: 80, Command: "worker"},
+		{PID: 200, User: "bob", CPUPercent: 90, MemPercent: 20, Command: "api-server"},
+		{PID: 300, User: "carol", CPUPercent: 50, MemPercent: 40, Command: "batch-worker"},
+	}
+
+	rows := prepareProcessRows(append([]ProcessInfo(nil), processes...), UIState{ProcessSort: SortByMemory})
+	if rows[0].PID != 100 {
+		t.Fatalf("Expected memory sort to put PID 100 first, got %+v", rows)
+	}
+
+	rows = prepareProcessRows(append([]ProcessInfo(nil), processes...), UIState{
+		ProcessSort:   SortByCPU,
+		ReverseSort:   true,
+		ProcessFilter: "worker",
+	})
+	if len(rows) != 2 {
+		t.Fatalf("Expected two filtered worker rows, got %+v", rows)
+	}
+	if rows[0].PID != 100 || rows[1].PID != 300 {
+		t.Fatalf("Expected reverse CPU order for filtered rows, got %+v", rows)
+	}
+}
+
+func TestHandleInputUpdatesUIState(t *testing.T) {
+	state := &State{ui: UIState{ProcessSort: SortByCPU}}
+	app := tview.NewApplication()
+
+	if got := handleInput(tcell.NewEventKey(tcell.KeyRune, '/', tcell.ModNone), state, app); got != nil {
+		t.Fatalf("Expected filter key to be consumed, got %v", got)
+	}
+	if !state.ui.SearchMode || state.ui.ProcessFilter != "" {
+		t.Fatalf("Expected search mode with empty filter, got %+v", state.ui)
+	}
+
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'y', tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyBackspace, 0, tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), state, app)
+	if state.ui.SearchMode || state.ui.ProcessFilter != "pt" {
+		t.Fatalf("Expected typed filter pt after editing, got %+v", state.ui)
+	}
+
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone), state, app)
+	handleInput(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), state, app)
+	if state.ui.ProcessSort != SortByMemory || !state.ui.ReverseSort || !state.ui.Paused || !state.ui.HideASCIIArt {
+		t.Fatalf("Expected sort/reverse/pause/ascii toggles, got %+v", state.ui)
+	}
+
+	handleInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), state, app)
+	if state.ui.ProcessFilter != "" {
+		t.Fatalf("Expected escape to clear filter, got %+v", state.ui)
 	}
 }
 
