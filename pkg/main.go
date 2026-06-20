@@ -31,7 +31,8 @@ const (
 	minCPUInfoCount           = 2                 // For cgroup CPU quota/period
 	minGPUUsageCount          = 2                 // For nvidia-smi GPU usage
 	minGPUInfoCount           = 5                 // For nvidia-smi pmon
-	waitDelta                 = 7                 // Number of coroutines to wait in the update wait group
+	barsPerGPU                = 2                 // GPU utilization and memory bars
+	dynamicCollectorCount     = 7                 // Number of dynamic collectors in updateAll
 	percentMultiplier         = 100.0             // Multiplier for percentage calculations
 	bytesPerKB                = 1024              // Bytes per kilobyte
 	bytesPerMB                = bytesPerKB * 1024 // Bytes per megabyte
@@ -50,6 +51,17 @@ const (
 	percentageWidth           = 5                 // Width for percentage display (e.g., " 26.3%")
 	minColumnWidth            = 70                // Minimum width required per column
 	minTotalWidthForMultiCol  = 150               // Minimum total width to use multi-column
+	commandTimeout            = 2 * time.Second   // Maximum time allowed for external probes
+	cgroupMaxToken            = "max"             // Cgroup token for unlimited resources
+	cgroupCPUMaxPath          = "/sys/fs/cgroup/cpu.max"
+	cgroupCPUStatPath         = "/sys/fs/cgroup/cpu.stat"
+	cgroupV1CPUQuotaPath      = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"
+	cgroupV1CPUPeriodPath     = "/sys/fs/cgroup/cpu/cpu.cfs_period_us"
+	cgroupV1CPUUsagePath      = "/sys/fs/cgroup/cpuacct/cpuacct.usage"
+	cgroupMemoryMaxPath       = "/sys/fs/cgroup/memory.max"
+	cgroupMemoryStatPath      = "/sys/fs/cgroup/memory.stat"
+	cgroupV1MemoryLimitPath   = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+	cgroupV1MemoryUsagePath   = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
 )
 
 // --- Interfaces ---
@@ -72,10 +84,18 @@ type CommandRunner interface {
 }
 
 // OSCommandRunner is the default implementation using the os/exec package.
-type OSCommandRunner struct{}
+type OSCommandRunner struct {
+	Timeout time.Duration
+}
 
 func (ocr OSCommandRunner) Output(name string, arg ...string) ([]byte, error) {
-	return exec.CommandContext(context.Background(), name, arg...).Output()
+	timeout := ocr.Timeout
+	if timeout <= 0 {
+		timeout = commandTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, arg...).Output()
 }
 
 // Stater defines an interface for checking file status.
@@ -137,9 +157,11 @@ type StorageUsage struct {
 
 // BarLayout holds information about how bars should be arranged.
 type BarLayout struct {
-	Columns    int // Number of columns
-	BarWidth   int // Width of each bar
-	TotalWidth int // Total width used
+	Columns       int // Number of columns
+	BarWidth      int // Width of each bar
+	TotalWidth    int // Total width used
+	MaxLabelWidth int // Maximum label width for alignment
+	MaxInfoWidth  int // Maximum info width for alignment
 }
 
 // BarData holds information for rendering a single bar.
@@ -194,7 +216,7 @@ type State struct {
 
 func main() {
 	fileReader := OSFileReader{}
-	cmdRunner := OSCommandRunner{}
+	cmdRunner := OSCommandRunner{Timeout: commandTimeout}
 	stater := OSStater{}
 
 	staticInfo, err := getStaticInfo(fileReader, cmdRunner, stater)
@@ -342,9 +364,11 @@ func updateResourceView(view *tview.TextView, state *State) int {
 	}
 
 	// Determine if DISK/GPU should use multi-column layout
-	var diskGPUBarWidth int
 	var sharedLayout BarLayout
 	if len(diskGPULabels) > 0 {
+		// Calculate unified max widths from all combined labels and infos for proper alignment
+		maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromSlices(diskGPULabels, diskGPUInfos)
+
 		// Determine the layout for all DISK/GPU entries combined
 		totalEntries := len(diskGPULabels)
 		maxColumns := maxDiskColumns
@@ -352,20 +376,49 @@ func updateResourceView(view *tview.TextView, state *State) int {
 			maxColumns = 1
 		}
 
-		// Calculate the layout to determine if we'll use multi-column
-		sharedLayout = calculateAlignedLayout(availableWidth, maxColumns)
-
-		if sharedLayout.Columns == 1 {
-			// Single column: use full available width
-			diskGPUBarWidth = calculateBarWidth(availableWidth, diskGPULabels, diskGPUInfos)
+		// Force single column if terminal is too narrow for multi-column
+		if availableWidth < minTotalWidthForMultiCol || maxColumns == 1 {
+			// Single column layout
+			sharedLayout = BarLayout{
+				Columns:       1,
+				BarWidth:      calculateBarWidth(availableWidth, diskGPULabels, diskGPUInfos),
+				TotalWidth:    availableWidth,
+				MaxLabelWidth: maxLabelWidth,
+				MaxInfoWidth:  maxInfoWidth,
+			}
 		} else {
-			// Multi-column: calculate bar width based on per-column width
-			spacingWidth := (sharedLayout.Columns - 1) * columnSpacing
-			widthPerColumn := (availableWidth - spacingWidth) / sharedLayout.Columns
-			diskGPUBarWidth = calculateBarWidth(widthPerColumn, diskGPULabels, diskGPUInfos)
+			// Multi-column layout - calculate based on actual content dimensions
+			spacingWidth := (maxColumns - 1) * columnSpacing
+			availableContentWidth := availableWidth - spacingWidth
+
+			// Calculate actual space required per column
+			actualSpacePerColumn := maxLabelWidth + spacesAroundBar + minBarWidth + spacesAroundBar + maxInfoWidth
+
+			// Check if we have enough space for the requested columns
+			if availableContentWidth < actualSpacePerColumn*maxColumns {
+				// Not enough space for multi-column, force single column
+				sharedLayout = BarLayout{
+					Columns:       1,
+					BarWidth:      calculateBarWidth(availableWidth, diskGPULabels, diskGPUInfos),
+					TotalWidth:    availableWidth,
+					MaxLabelWidth: maxLabelWidth,
+					MaxInfoWidth:  maxInfoWidth,
+				}
+			} else {
+				// We can fit multi-column layout
+				widthPerColumn := availableContentWidth / maxColumns
+				barWidth := calculateBarWidth(widthPerColumn, diskGPULabels, diskGPUInfos)
+				totalWidth := maxColumns*widthPerColumn + spacingWidth
+
+				sharedLayout = BarLayout{
+					Columns:       maxColumns,
+					BarWidth:      barWidth,
+					TotalWidth:    totalWidth,
+					MaxLabelWidth: maxLabelWidth,
+					MaxInfoWidth:  maxInfoWidth,
+				}
+			}
 		}
-		// Update the layout with the calculated bar width
-		sharedLayout.BarWidth = diskGPUBarWidth
 	}
 
 	// Build sections with unified layout and bar width
@@ -426,7 +479,11 @@ func calculateMEMLabelInfo(state *State) (string, string, float64) {
 		// Running inside container with limits
 		percent = (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
 		label = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", percent)
-		info = fmt.Sprintf(" [darkcyan]%.3f GB / %.3f GB[white]", state.dynamic.ContainerMemUsedGB, state.static.ContainerMemLimitGB)
+		info = fmt.Sprintf(
+			" [darkcyan]%.3f GB / %.3f GB[white]",
+			state.dynamic.ContainerMemUsedGB,
+			state.static.ContainerMemLimitGB,
+		)
 	}
 	return label, info, percent
 }
@@ -461,9 +518,9 @@ func calculateBarWidth(availableWidth int, labels []string, infos []string) int 
 
 // calculateStorageLabelsInfo calculates all storage labels, info texts, and percentages.
 func calculateStorageLabelsInfo(state *State) ([]string, []string, []float64) {
-	var labels []string
-	var infos []string
-	var percentages []float64
+	labels := make([]string, 0, len(state.dynamic.StorageUsage))
+	infos := make([]string, 0, len(state.dynamic.StorageUsage))
+	percentages := make([]float64, 0, len(state.dynamic.StorageUsage))
 	for _, storage := range state.dynamic.StorageUsage {
 		// Shorten long mount paths for display
 		displayPath := storage.Path
@@ -487,9 +544,9 @@ func calculateStorageLabelsInfo(state *State) ([]string, []string, []float64) {
 
 // calculateGPULabelsInfo calculates all GPU labels, info texts, and percentages.
 func calculateGPULabelsInfo(state *State) ([]string, []string, []float64) {
-	var labels []string
-	var infos []string
-	var percentages []float64
+	labels := make([]string, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
+	infos := make([]string, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
+	percentages := make([]float64, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
 	for i, gpu := range state.dynamic.LiveGPUUsage {
 		// GPU Utilization - Format as: "GPU0 Util:" with right-aligned percentage
 		utilLabel := fmt.Sprintf("GPU%d Util:", i)
@@ -531,63 +588,6 @@ func buildMemorySection(barWidth int, memLabel string, memInfo string, memPercen
 	return memLabel + makeBar(memPercent, barWidth) + memInfo + "\n"
 }
 
-// calculateAlignedLayout creates a layout that maximizes bar width while ensuring perfect alignment.
-func calculateAlignedLayout(availableWidth, requestedColumns int) BarLayout {
-	if availableWidth < minBarWidth || requestedColumns <= 0 {
-		return BarLayout{Columns: 1, BarWidth: minBarWidth, TotalWidth: minBarWidth}
-	}
-
-	// Force single column if terminal is too narrow for multi-column
-	if availableWidth < minTotalWidthForMultiCol || requestedColumns == 1 {
-		// Single column layout
-		reservedSpace := minLabelWidth + percentageWidth + estimatedInfoWidth + spacesAroundBar
-		barWidth := availableWidth - reservedSpace
-		if barWidth < minBarWidth {
-			barWidth = minBarWidth
-		}
-		return BarLayout{
-			Columns:    1,
-			BarWidth:   barWidth,
-			TotalWidth: barWidth + reservedSpace,
-		}
-	}
-
-	// Multi-column layout
-	columns := requestedColumns
-	spacingWidth := (columns - 1) * columnSpacing
-	availableContentWidth := availableWidth - spacingWidth
-
-	// Check if we have enough space for the requested columns
-	minRequiredPerColumn := minColumnWidth
-	if availableContentWidth < minRequiredPerColumn*columns {
-		// Not enough space for multi-column, force single column
-		return calculateAlignedLayout(availableWidth, 1)
-	}
-
-	// Calculate width per column
-	widthPerColumn := availableContentWidth / columns
-
-	// Reserve space for label, percentage, info, and spaces around the bar
-	reservedSpacePerColumn := minLabelWidth + percentageWidth + estimatedInfoWidth + spacesAroundBar
-
-	// Calculate bar width as remaining space in each column
-	barWidth := widthPerColumn - reservedSpacePerColumn
-
-	// Ensure minimum bar width
-	if barWidth < minBarWidth {
-		barWidth = minBarWidth
-		widthPerColumn = barWidth + reservedSpacePerColumn
-	}
-
-	totalWidth := columns*widthPerColumn + spacingWidth
-
-	return BarLayout{
-		Columns:    columns,
-		BarWidth:   barWidth,
-		TotalWidth: totalWidth,
-	}
-}
-
 // buildStorageSection creates the storage usage display section.
 func buildStorageSection(layout BarLayout, labels []string, infos []string, percentages []float64) string {
 	var builder strings.Builder
@@ -598,7 +598,7 @@ func buildStorageSection(layout BarLayout, labels []string, infos []string, perc
 	}
 
 	// Collect storage bars data
-	var storageBars []BarData
+	storageBars := make([]BarData, 0, len(labels))
 	for i := range labels {
 		storageBars = append(storageBars, BarData{
 			Label:   labels[i],
@@ -635,7 +635,7 @@ func buildGPUSection(layout BarLayout, labels []string, infos []string, percenta
 	}
 
 	// Collect GPU bars data
-	var gpuBars []BarData
+	gpuBars := make([]BarData, 0, len(labels))
 	for i := range labels {
 		gpuBars = append(gpuBars, BarData{
 			Label:   labels[i],
@@ -730,23 +730,16 @@ func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 	}
 
 	numRows := (len(bars) + layout.Columns - 1) / layout.Columns
-	maxLabelWidth, maxInfoWidth := calculateMaxWidths(bars)
 
-	// Adjust bar width based on actual content requirements
+	// Use the unified max widths from layout for consistent alignment across sections
+	maxLabelWidth := layout.MaxLabelWidth
+	maxInfoWidth := layout.MaxInfoWidth
+
+	// Use the unified bar width from layout without recalculation
+	// This ensures consistent bar width across different sections (DISK/GPU)
 	actualBarWidth := layout.BarWidth
-	minRequiredWidth := maxLabelWidth + 1 + minBarWidth + 1 + maxInfoWidth
 
-	// If we have more space available per column, allocate it to bars
-	spacingWidth := (layout.Columns - 1) * columnSpacing
-	availablePerColumn := (layout.TotalWidth - spacingWidth) / layout.Columns
-	if availablePerColumn > minRequiredWidth {
-		actualBarWidth = availablePerColumn - maxLabelWidth - maxInfoWidth - spacesAroundBar
-		if actualBarWidth < minBarWidth {
-			actualBarWidth = minBarWidth
-		}
-	}
-
-	var result []string
+	result := make([]string, 0, numRows)
 	for row := range numRows {
 		rowContent := buildAlignedRow(bars, BarLayout{
 			Columns:    layout.Columns,
@@ -759,18 +752,20 @@ func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 	return result
 }
 
-// calculateMaxWidths finds the maximum label and info widths across all bars.
-func calculateMaxWidths(bars []BarData) (int, int) {
+// calculateMaxWidthsFromSlices calculates max widths from separate label and info slices for unified alignment.
+func calculateMaxWidthsFromSlices(labels []string, infos []string) (int, int) {
 	maxLabelWidth := 0
 	maxInfoWidth := 0
 
-	for _, bar := range bars {
-		labelWidth := tview.TaggedStringWidth(bar.Label)
+	for _, label := range labels {
+		labelWidth := tview.TaggedStringWidth(label)
 		if labelWidth > maxLabelWidth {
 			maxLabelWidth = labelWidth
 		}
+	}
 
-		infoWidth := tview.TaggedStringWidth(bar.Info)
+	for _, info := range infos {
+		infoWidth := tview.TaggedStringWidth(info)
 		if infoWidth > maxInfoWidth {
 			maxInfoWidth = infoWidth
 		}
@@ -781,7 +776,7 @@ func calculateMaxWidths(bars []BarData) (int, int) {
 
 // buildAlignedRow creates a single row of aligned bars.
 func buildAlignedRow(bars []BarData, layout BarLayout, row, maxLabelWidth, maxInfoWidth int) string {
-	var completeBars []string
+	completeBars := make([]string, 0, layout.Columns)
 
 	// Calculate the width each column should occupy
 	spacingWidth := (layout.Columns - 1) * columnSpacing
@@ -886,34 +881,44 @@ func updateHostMemUsage() float64 {
 
 // updateAll fetches all dynamic data and updates the state.
 func updateAll(state *State, fs FileReader, runner CommandRunner) {
-	state.dynamic.mu.Lock()
-	defer state.dynamic.mu.Unlock()
+	staticInfo := state.static
+	var dynamic DynamicInfo
 	var wg sync.WaitGroup
-	wg.Add(waitDelta)
-	go func() { defer wg.Done(); state.dynamic.ContainerCPUUsage = updateContainerCPUUsage(state, fs) }()
+	wg.Add(dynamicCollectorCount)
+	go func() { defer wg.Done(); dynamic.ContainerCPUUsage = updateContainerCPUUsage(state, fs) }()
 	go func() {
 		defer wg.Done()
-		state.dynamic.ContainerMemUsedGB = updateContainerMemUsage(state.static.CgroupVersion, fs)
+		dynamic.ContainerMemUsedGB = updateContainerMemUsage(staticInfo.CgroupVersion, fs)
 	}()
 	go func() {
 		defer wg.Done()
-		state.dynamic.LiveGPUUsage = updateLiveGPUUsage(state.static.GPUCount, runner)
+		dynamic.LiveGPUUsage = updateLiveGPUUsage(staticInfo.GPUCount, runner)
 	}()
 	go func() {
 		defer wg.Done()
-		state.dynamic.StorageUsage = updateStorageUsage(state.static.StorageMounts)
+		dynamic.StorageUsage = updateStorageUsage(staticInfo.StorageMounts)
 	}()
-	go func() { defer wg.Done(); state.dynamic.Processes = updateProcessList(&state.static, runner) }()
-	go func() { defer wg.Done(); state.dynamic.HostCPUUsage = updateHostCPUUsage() }()
-	go func() { defer wg.Done(); state.dynamic.HostMemUsedGB = updateHostMemUsage() }()
+	go func() { defer wg.Done(); dynamic.Processes = updateProcessList(&staticInfo, runner) }()
+	go func() { defer wg.Done(); dynamic.HostCPUUsage = updateHostCPUUsage() }()
+	go func() { defer wg.Done(); dynamic.HostMemUsedGB = updateHostMemUsage() }()
 	wg.Wait()
+
+	state.dynamic.mu.Lock()
+	state.dynamic.ContainerCPUUsage = dynamic.ContainerCPUUsage
+	state.dynamic.ContainerMemUsedGB = dynamic.ContainerMemUsedGB
+	state.dynamic.LiveGPUUsage = dynamic.LiveGPUUsage
+	state.dynamic.StorageUsage = dynamic.StorageUsage
+	state.dynamic.Processes = dynamic.Processes
+	state.dynamic.HostCPUUsage = dynamic.HostCPUUsage
+	state.dynamic.HostMemUsedGB = dynamic.HostMemUsedGB
+	state.dynamic.mu.Unlock()
 }
 
 // getStaticInfo fetches static information about the container and host.
 func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticInfo, error) {
 	var info StaticInfo
 	var err error
-	if _, err = stater.Stat("/sys/fs/cgroup/cpu.max"); os.IsNotExist(err) {
+	if _, err = stater.Stat(cgroupCPUMaxPath); os.IsNotExist(err) {
 		info.CgroupVersion = CgroupV1
 	} else {
 		info.CgroupVersion = CgroupV2
@@ -961,18 +966,27 @@ func readStringFromFile(path string, fs FileReader) (string, error) {
 func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int, fs FileReader) float64 {
 	var quota, period uint64
 	if cgroupVersion == CgroupV2 {
-		cpuMaxStr, _ := readStringFromFile("/sys/fs/cgroup/cpu.max", fs)
+		cpuMaxStr, err := readStringFromFile(cgroupCPUMaxPath, fs)
+		if err != nil {
+			return float64(hostCores)
+		}
 		parts := strings.Fields(cpuMaxStr)
 		if len(parts) == minCPUInfoCount {
-			if parts[0] == "max" {
+			if parts[0] == cgroupMaxToken {
 				return float64(hostCores)
 			}
-			quota, _ = strconv.ParseUint(parts[0], 10, 64)
-			period, _ = strconv.ParseUint(parts[1], 10, 64)
+			quota, err = strconv.ParseUint(parts[0], 10, 64)
+			if err != nil {
+				return float64(hostCores)
+			}
+			period, err = strconv.ParseUint(parts[1], 10, 64)
+			if err != nil {
+				return float64(hostCores)
+			}
 		}
 	} else { // CgroupV1
-		q, err1 := readUintFromFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", fs)
-		p, err2 := readUintFromFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us", fs)
+		q, err1 := readUintFromFile(cgroupV1CPUQuotaPath, fs)
+		p, err2 := readUintFromFile(cgroupV1CPUPeriodPath, fs)
 		if err1 == nil && err2 == nil {
 			quota, period = q, p
 		} else {
@@ -989,12 +1003,12 @@ func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int, fs FileRea
 func getContainerMemLimit(cgroupVersion CgroupVersion, fs FileReader) (int64, float64) {
 	var path string
 	if cgroupVersion == CgroupV2 {
-		path = "/sys/fs/cgroup/memory.max"
+		path = cgroupMemoryMaxPath
 	} else {
-		path = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+		path = cgroupV1MemoryLimitPath
 	}
 	limitStr, err := readStringFromFile(path, fs)
-	if err != nil || limitStr == "max" {
+	if err != nil || limitStr == cgroupMaxToken {
 		return 0, 0
 	}
 	limitBytes, err := strconv.ParseInt(limitStr, 10, 64)
@@ -1009,17 +1023,23 @@ func updateContainerCPUUsage(state *State, fs FileReader) float64 {
 	var currentUsage uint64
 
 	if state.static.CgroupVersion == CgroupV2 {
-		statStr, _ := readStringFromFile("/sys/fs/cgroup/cpu.stat", fs)
+		statStr, err := readStringFromFile(cgroupCPUStatPath, fs)
+		if err != nil {
+			return 0
+		}
 		for _, line := range strings.Split(statStr, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) == 2 && parts[0] == "usage_usec" {
-				currentUsage, _ = strconv.ParseUint(parts[1], 10, 64)
+				currentUsage, err = strconv.ParseUint(parts[1], 10, 64)
+				if err != nil {
+					return 0
+				}
 				break
 			}
 		}
 	} else { // CgroupV1
 		// value is in nanoseconds, convert to microseconds
-		ns, err := readUintFromFile("/sys/fs/cgroup/cpuacct/cpuacct.usage", fs)
+		ns, err := readUintFromFile(cgroupV1CPUUsagePath, fs)
 		if err == nil {
 			currentUsage = ns / nanosecondsToMicroseconds
 		}
@@ -1029,7 +1049,7 @@ func updateContainerCPUUsage(state *State, fs FileReader) float64 {
 	timeDelta := now.Sub(state.prevCPUTime).Seconds()
 
 	var cpuPercent float64
-	if timeDelta > 0 && currentUsage > state.prevCPUUsage {
+	if timeDelta > 0 && currentUsage > state.prevCPUUsage && state.static.ContainerCPULimit > 0 {
 		usageDelta := float64(currentUsage - state.prevCPUUsage) // in microseconds
 		// usageDelta is how many microseconds of CPU time were used.
 		// timeDelta * 1e6 is how many microseconds passed in wall-clock time.
@@ -1050,18 +1070,23 @@ func updateContainerCPUUsage(state *State, fs FileReader) float64 {
 func updateContainerMemUsage(cgroupVersion CgroupVersion, fs FileReader) float64 {
 	if cgroupVersion == CgroupV2 {
 		// 'anon' memory is a good proxy for non-cache process memory
-		statStr, _ := readStringFromFile("/sys/fs/cgroup/memory.stat", fs)
+		statStr, err := readStringFromFile(cgroupMemoryStatPath, fs)
+		if err != nil {
+			return 0
+		}
 		for _, line := range strings.Split(statStr, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) == 2 && parts[0] == "anon" {
-				bytes, _ := strconv.ParseUint(parts[1], 10, 64)
+				bytes, parseErr := strconv.ParseUint(parts[1], 10, 64)
+				if parseErr != nil {
+					return 0
+				}
 				return float64(bytes) / float64(bytesPerGB)
 			}
 		}
 	} else { // CgroupV1
 		// memory.usage_in_bytes includes file cache, but is the standard.
-		path := "/sys/fs/cgroup/memory/memory.usage_in_bytes"
-		bytes, err := readUintFromFile(path, fs)
+		bytes, err := readUintFromFile(cgroupV1MemoryUsagePath, fs)
 		if err == nil {
 			return float64(bytes) / float64(bytesPerGB)
 		}
@@ -1076,7 +1101,7 @@ func getStaticStorageInfo() []StorageMount {
 		return nil
 	}
 
-	var mounts []StorageMount
+	mounts := make([]StorageMount, 0, len(partitions))
 	for _, partition := range partitions {
 		// Skip virtual filesystems and temporary mounts
 		if shouldSkipFilesystem(partition.Fstype, partition.Mountpoint) {
@@ -1140,7 +1165,7 @@ func updateStorageUsage(storageMounts []StorageMount) []StorageUsage {
 		return nil
 	}
 
-	var usage []StorageUsage
+	usage := make([]StorageUsage, 0, len(storageMounts))
 	for _, mount := range storageMounts {
 		stat, err := disk.Usage(mount.Path)
 		if err != nil {
@@ -1168,12 +1193,15 @@ func getStaticGPUInfo(runner CommandRunner) (int, []float64) {
 	if len(linesMem) == 0 || linesMem[0] == "" {
 		return 0, nil
 	}
-	totals := make([]float64, len(linesMem))
-	for i, line := range linesMem {
-		mb, _ := strconv.ParseFloat(strings.TrimSpace(line), 64)
-		totals[i] = mb / bytesPerKB // Convert MB to GB
+	totals := make([]float64, 0, len(linesMem))
+	for _, line := range linesMem {
+		mb, parseErr := strconv.ParseFloat(strings.TrimSpace(line), 64)
+		if parseErr != nil {
+			continue
+		}
+		totals = append(totals, mb/bytesPerKB) // Convert MB to GB
 	}
-	return len(linesMem), totals
+	return len(totals), totals
 }
 
 // updateLiveGPUUsage fetches current GPU utilization and memory usage.
@@ -1192,8 +1220,14 @@ func updateLiveGPUUsage(gpuCount int, runner CommandRunner) []GPUUsage {
 		if len(parts) != minGPUUsageCount {
 			continue
 		}
-		util, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
-		memUsedMB, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		util, parseErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if parseErr != nil {
+			continue
+		}
+		memUsedMB, parseErr := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if parseErr != nil {
+			continue
+		}
 		usage = append(usage, GPUUsage{Index: i, Utilization: util, MemUsedGB: memUsedMB / bytesPerKB})
 	}
 	return usage
@@ -1206,8 +1240,8 @@ func getGPUProcessMap(runner CommandRunner) map[int32]GPUProcessInfo {
 	if err != nil {
 		return nil
 	}
-	processMap := make(map[int32]GPUProcessInfo)
 	lines := strings.Split(string(out), "\n")
+	processMap := make(map[int32]GPUProcessInfo, len(lines))
 	for _, line := range lines {
 		if strings.HasPrefix(line, "#") {
 			continue
@@ -1221,78 +1255,102 @@ func getGPUProcessMap(runner CommandRunner) map[int32]GPUProcessInfo {
 		if err != nil {
 			continue
 		}
-		gpuIndex, _ := strconv.Atoi(fields[0])
-		gpuUtil, _ := strconv.ParseUint(fields[3], 10, 64)
-		memUtil, _ := strconv.ParseUint(fields[4], 10, 64)
+		gpuIndex, parseErr := strconv.Atoi(fields[0])
+		if parseErr != nil {
+			continue
+		}
+		gpuUtil, parseErr := parseGPUPercentField(fields[3])
+		if parseErr != nil {
+			continue
+		}
+		memUtil, parseErr := parseGPUPercentField(fields[4])
+		if parseErr != nil {
+			continue
+		}
 		processMap[int32(pid)] = GPUProcessInfo{GPUIndex: gpuIndex, GPUUtil: gpuUtil, GPUMemUtil: memUtil}
 	}
 	return processMap
 }
 
+func parseGPUPercentField(value string) (uint64, error) {
+	if value == "-" {
+		return 0, nil
+	}
+	return strconv.ParseUint(value, 10, 64)
+}
+
 // updateProcessList fetches the current process list and adds resource usage info when possible.
 func updateProcessList(static *StaticInfo, runner CommandRunner) []ProcessInfo {
-	gpuProcessMap := getGPUProcessMap(runner)
+	var gpuProcessMap map[int32]GPUProcessInfo
+	if static.GPUCount > 0 {
+		gpuProcessMap = getGPUProcessMap(runner)
+	}
 	procs, err := process.Processes()
 	if err != nil {
 		return nil
 	}
-	var processList []ProcessInfo
+	processList := make([]ProcessInfo, 0, len(procs))
 	for _, p := range procs {
-		var cpuPercent float64
-		cpuPercent, err = p.CPUPercent()
-		if err != nil {
+		pi, ok := getProcessInfo(p, static, gpuProcessMap)
+		if !ok {
 			continue
 		}
-		var memInfo *process.MemoryInfoStat
-		memInfo, err = p.MemoryInfo()
-		if err != nil {
-			continue
-		}
-		var user string
-		user, err = p.Username()
-		if err != nil {
-			user = "n/a"
-		}
-		var cmdline string
-		cmdline, err = p.Cmdline()
-		if err != nil || cmdline == "" {
-			var name string
-			name, err = p.Name()
-			if err != nil {
-				continue
-			}
-			cmdline = "[" + name + "]"
-		}
-		containerCPUPercent := 0.0
-		if static.ContainerCPULimit > 0 {
-			containerCPUPercent = cpuPercent / static.ContainerCPULimit
-		}
-		containerMemPercent := 0.0
-		if static.ContainerMemLimitBytes > 0 {
-			containerMemPercent = (float64(memInfo.RSS) / float64(static.ContainerMemLimitBytes)) * percentMultiplier
-		}
-		gpuInfo, onGPU := gpuProcessMap[p.Pid]
-
-		pi := ProcessInfo{
-			PID:        p.Pid,
-			User:       user,
-			CPUPercent: containerCPUPercent,
-			MemPercent: containerMemPercent,
-			Command:    cmdline,
-			rawCPU:     cpuPercent,
-			GPUIndex:   -1, // Default to no GPU
-		}
-
-		if onGPU {
-			pi.GPUIndex = gpuInfo.GPUIndex
-			pi.GPUUtil = gpuInfo.GPUUtil
-			pi.GPUMemPercent = float64(gpuInfo.GPUMemUtil)
-		}
-
 		processList = append(processList, pi)
 	}
 	sort.Slice(processList, func(i, j int) bool {
 		return processList[i].rawCPU > processList[j].rawCPU
 	})
 	return processList
+}
+
+func getProcessInfo(
+	p *process.Process,
+	static *StaticInfo,
+	gpuProcessMap map[int32]GPUProcessInfo,
+) (ProcessInfo, bool) {
+	cpuPercent, err := p.CPUPercent()
+	if err != nil {
+		return ProcessInfo{}, false
+	}
+	memInfo, err := p.MemoryInfo()
+	if err != nil {
+		return ProcessInfo{}, false
+	}
+	user, err := p.Username()
+	if err != nil {
+		user = "n/a"
+	}
+	cmdline, err := p.Cmdline()
+	if err != nil || cmdline == "" {
+		name, nameErr := p.Name()
+		if nameErr != nil {
+			return ProcessInfo{}, false
+		}
+		cmdline = "[" + name + "]"
+	}
+
+	containerCPUPercent := 0.0
+	if static.ContainerCPULimit > 0 {
+		containerCPUPercent = cpuPercent / static.ContainerCPULimit
+	}
+	containerMemPercent := 0.0
+	if static.ContainerMemLimitBytes > 0 {
+		containerMemPercent = (float64(memInfo.RSS) / float64(static.ContainerMemLimitBytes)) * percentMultiplier
+	}
+
+	pi := ProcessInfo{
+		PID:        p.Pid,
+		User:       user,
+		CPUPercent: containerCPUPercent,
+		MemPercent: containerMemPercent,
+		Command:    cmdline,
+		rawCPU:     cpuPercent,
+		GPUIndex:   -1,
+	}
+	if gpuInfo, onGPU := gpuProcessMap[p.Pid]; onGPU {
+		pi.GPUIndex = gpuInfo.GPUIndex
+		pi.GPUUtil = gpuInfo.GPUUtil
+		pi.GPUMemPercent = float64(gpuInfo.GPUMemUtil)
+	}
+	return pi, true
 }

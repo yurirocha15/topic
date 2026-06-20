@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,15 @@ func (mcr MockCommandRunner) Output(name string, arg ...string) ([]byte, error) 
 		return []byte(output), mcr.err
 	}
 	return nil, fmt.Errorf("mock command not found: %s", cmdKey)
+}
+
+type CountingCommandRunner struct {
+	calls int
+}
+
+func (ccr *CountingCommandRunner) Output(_ string, _ ...string) ([]byte, error) {
+	ccr.calls++
+	return nil, errors.New("unexpected command call")
 }
 
 // MockStater simulates os.Stat for testing cgroup version detection.
@@ -194,6 +204,13 @@ func TestGetContainerCPULimit(t *testing.T) {
 			expectedCPULimit: 8.0,
 		},
 		{
+			name:             "CgroupV2 with malformed quota",
+			cgroupVersion:    CgroupV2,
+			mockFiles:        map[string]string{"/sys/fs/cgroup/cpu.max": "bad 100000"},
+			hostCores:        8,
+			expectedCPULimit: 8.0,
+		},
+		{
 			name:             "CgroupV1 with numeric limit (0.5 cores)", //nolint:golines
 			cgroupVersion:    CgroupV1,
 			mockFiles:        map[string]string{"/sys/fs/cgroup/cpu/cpu.cfs_quota_us": "50000", "/sys/fs/cgroup/cpu/cpu.cfs_period_us": "100000"},
@@ -244,6 +261,12 @@ func TestUpdateContainerMemUsage(t *testing.T) {
 			name:          "File not found",
 			cgroupVersion: CgroupV2,
 			mockFiles:     map[string]string{},
+			expectedGB:    0.0,
+		},
+		{
+			name:          "Malformed anon memory",
+			cgroupVersion: CgroupV2,
+			mockFiles:     map[string]string{"/sys/fs/cgroup/memory.stat": "anon not-a-number"},
 			expectedGB:    0.0,
 		},
 	}
@@ -332,6 +355,22 @@ func TestUpdateContainerCPUUsage(t *testing.T) {
 			mockFiles:       map[string]string{"/sys/fs/cgroup/cpu.stat": "usage_usec 1000000"},
 			expectedPercent: 0.0,
 		},
+		{
+			name:            "Zero CPU limit does not divide by zero",
+			cgroupVersion:   CgroupV2,
+			cpuLimit:        0.0,
+			prevUsage:       1000000,
+			mockFiles:       map[string]string{"/sys/fs/cgroup/cpu.stat": "usage_usec 2000000"},
+			expectedPercent: 0.0,
+		},
+		{
+			name:            "Malformed usage is ignored",
+			cgroupVersion:   CgroupV2,
+			cpuLimit:        2.0,
+			prevUsage:       1000000,
+			mockFiles:       map[string]string{"/sys/fs/cgroup/cpu.stat": "usage_usec nope"},
+			expectedPercent: 0.0,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -353,6 +392,22 @@ func TestUpdateContainerCPUUsage(t *testing.T) {
 				t.Errorf("Expected CPU percent %.2f, but got %.2f", tc.expectedPercent, actualPercent)
 			}
 		})
+	}
+}
+
+func TestOSCommandRunnerTimeout(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep is required for timeout test")
+	}
+
+	runner := OSCommandRunner{Timeout: 10 * time.Millisecond}
+	start := time.Now()
+	_, err := runner.Output("sleep", "1")
+	if err == nil {
+		t.Fatal("Expected timeout error, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("Command timeout took too long: %s", elapsed)
 	}
 }
 
@@ -405,6 +460,27 @@ func TestGetGPUProcessMap(t *testing.T) {
 	}
 }
 
+func TestGetGPUProcessMapSkipsMalformedRows(t *testing.T) {
+	mockRunner := MockCommandRunner{
+		outputs: map[string]string{
+			"nvidia-smi pmon -c 1 -s um": `# gpu pid type sm mem enc dec command
+    bad 20131 C 15 8 - - python
+    0 nope C 15 8 - - python
+    0 20132 C nope 8 - - python
+    0 20133 C 15 nope - - python
+    1 20134 C 22 15 - - python`,
+		},
+	}
+
+	processMap := getGPUProcessMap(mockRunner)
+	if len(processMap) != 1 {
+		t.Fatalf("Expected 1 valid process, got %d", len(processMap))
+	}
+	if _, ok := processMap[20134]; !ok {
+		t.Fatal("Expected valid PID 20134 in process map")
+	}
+}
+
 // TestGetStaticGPUInfo tests the parsing of nvidia-smi for static GPU info.
 func TestGetStaticGPUInfo(t *testing.T) {
 	mockRunner := MockCommandRunner{
@@ -426,6 +502,22 @@ func TestGetStaticGPUInfo(t *testing.T) {
 	}
 }
 
+func TestGetStaticGPUInfoSkipsMalformedRows(t *testing.T) {
+	mockRunner := MockCommandRunner{
+		outputs: map[string]string{
+			"nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits": "8192\nnot-a-number\n16384\n",
+		},
+	}
+
+	count, totals := getStaticGPUInfo(mockRunner)
+	if count != 2 {
+		t.Fatalf("Expected GPU count of 2, got %d", count)
+	}
+	if len(totals) != 2 || totals[0] != 8.0 || totals[1] != 16.0 {
+		t.Fatalf("Expected valid totals [8 16], got %v", totals)
+	}
+}
+
 // TestUpdateLiveGPUUsage tests the parsing of nvidia-smi for live GPU usage.
 func TestUpdateLiveGPUUsage(t *testing.T) {
 	mockRunner := MockCommandRunner{
@@ -444,6 +536,32 @@ func TestUpdateLiveGPUUsage(t *testing.T) {
 	}
 	if usage[1].Utilization != 75 || usage[1].MemUsedGB != 4.0 {
 		t.Errorf("GPU 1 usage mismatch: got %+v, want {Utilization:75 MemUsedGB:4.0}", usage[1])
+	}
+}
+
+func TestUpdateLiveGPUUsageSkipsMalformedRows(t *testing.T) {
+	mockRunner := MockCommandRunner{
+		outputs: map[string]string{
+			"nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits": "bad, 2048\n75, nope\n80, 1024\n",
+		},
+	}
+
+	usage := updateLiveGPUUsage(3, mockRunner)
+	if len(usage) != 1 {
+		t.Fatalf("Expected one valid GPU usage row, got %d", len(usage))
+	}
+	if usage[0].Index != 2 || usage[0].Utilization != 80 || usage[0].MemUsedGB != 1.0 {
+		t.Fatalf("Unexpected parsed GPU usage: %+v", usage[0])
+	}
+}
+
+func TestUpdateProcessListSkipsGPUProbeWhenNoGPU(t *testing.T) {
+	runner := &CountingCommandRunner{}
+	staticInfo := &StaticInfo{GPUCount: 0}
+
+	_ = updateProcessList(staticInfo, runner)
+	if runner.calls != 0 {
+		t.Fatalf("Expected no GPU probe calls, got %d", runner.calls)
 	}
 }
 
@@ -520,6 +638,7 @@ func TestUpdateProcessList(t *testing.T) {
 	staticInfo := &StaticInfo{
 		ContainerCPULimit:      4.0,
 		ContainerMemLimitBytes: 8 * 1024 * 1024 * 1024, // 8 GB
+		GPUCount:               1,
 		GPUTotalGB:             []float64{16.0},
 	}
 
