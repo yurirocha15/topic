@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/rivo/tview"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -104,6 +106,58 @@ func (mph MockProcessHandle) Name() (string, error) {
 		return "", errors.New("missing name")
 	}
 	return mph.name, nil
+}
+
+type MockHostMetricsProvider struct {
+	cores      int
+	cpuPercent []float64
+	memory     *mem.VirtualMemoryStat
+	err        error
+}
+
+func (mhp MockHostMetricsProvider) CPUCounts(_ bool) (int, error) {
+	if mhp.err != nil {
+		return 0, mhp.err
+	}
+	return mhp.cores, nil
+}
+
+func (mhp MockHostMetricsProvider) CPUPercent(_ time.Duration, _ bool) ([]float64, error) {
+	if mhp.err != nil {
+		return nil, mhp.err
+	}
+	return mhp.cpuPercent, nil
+}
+
+func (mhp MockHostMetricsProvider) VirtualMemory() (*mem.VirtualMemoryStat, error) {
+	if mhp.err != nil {
+		return nil, mhp.err
+	}
+	return mhp.memory, nil
+}
+
+type MockStorageProvider struct {
+	partitions []disk.PartitionStat
+	usages     map[string]*disk.UsageStat
+	err        error
+}
+
+func (msp MockStorageProvider) Partitions(_ bool) ([]disk.PartitionStat, error) {
+	if msp.err != nil {
+		return nil, msp.err
+	}
+	return msp.partitions, nil
+}
+
+func (msp MockStorageProvider) Usage(path string) (*disk.UsageStat, error) {
+	if msp.err != nil {
+		return nil, msp.err
+	}
+	usage, ok := msp.usages[path]
+	if !ok {
+		return nil, errors.New("missing usage")
+	}
+	return usage, nil
 }
 
 // MockStater simulates os.Stat for testing cgroup version detection.
@@ -898,6 +952,29 @@ func TestUpdateProcessListSkipsGPUProbeWhenNoGPU(t *testing.T) {
 	}
 }
 
+func TestHostMetricsProviders(t *testing.T) {
+	provider := MockHostMetricsProvider{
+		cores:      8,
+		cpuPercent: []float64{42.5},
+		memory:     &mem.VirtualMemoryStat{Total: 16 * bytesPerGB, Used: 4 * bytesPerGB},
+	}
+
+	if got := updateHostCPUUsageWithProvider(provider); got != 42.5 {
+		t.Fatalf("Expected host CPU 42.5, got %.1f", got)
+	}
+	if got := updateHostMemUsageWithProvider(provider); got != 4 {
+		t.Fatalf("Expected host memory 4GB, got %.1f", got)
+	}
+
+	errProvider := MockHostMetricsProvider{err: errors.New("host failure")}
+	if got := updateHostCPUUsageWithProvider(errProvider); got != 0 {
+		t.Fatalf("Expected host CPU fallback 0, got %.1f", got)
+	}
+	if got := updateHostMemUsageWithProvider(errProvider); got != 0 {
+		t.Fatalf("Expected host memory fallback 0, got %.1f", got)
+	}
+}
+
 // TestGetStaticInfo tests the main static info gathering function.
 func TestGetStaticInfo(t *testing.T) {
 	testCases := []struct {
@@ -955,6 +1032,42 @@ func TestGetStaticInfo(t *testing.T) {
 				t.Errorf("Expected GPUCount %d, got %d", tc.expectedGPUCount, info.GPUCount)
 			}
 		})
+	}
+}
+
+func TestGetStaticInfoWithProviders(t *testing.T) {
+	fs := MockFileReader{files: map[string]string{
+		cgroupCPUMaxPath:    "200000 100000",
+		cgroupMemoryMaxPath: "8589934592",
+	}}
+	runner := MockCommandRunner{err: errors.New("no gpu")}
+	stater := MockStater{}
+	hostProvider := MockHostMetricsProvider{
+		cores:  12,
+		memory: &mem.VirtualMemoryStat{Total: 32 * bytesPerGB},
+	}
+	storageProvider := MockStorageProvider{
+		partitions: []disk.PartitionStat{
+			{Mountpoint: "/", Fstype: "ext4"},
+			{Mountpoint: "/proc", Fstype: "proc"},
+		},
+		usages: map[string]*disk.UsageStat{
+			"/": {Total: 100 * bytesPerGB},
+		},
+	}
+
+	info, err := getStaticInfoWithProviders(fs, runner, stater, hostProvider, storageProvider)
+	if err != nil {
+		t.Fatalf("Unexpected static info error: %v", err)
+	}
+	if info.HostCores != 12 || info.ContainerCPULimit != 2 || info.ContainerMemLimitGB != 8 {
+		t.Fatalf("Unexpected static CPU/memory info: %+v", info)
+	}
+	if info.HostMemTotalGB != 32 {
+		t.Fatalf("Expected host memory total 32GB, got %.1f", info.HostMemTotalGB)
+	}
+	if len(info.StorageMounts) != 1 || info.StorageMounts[0].Path != "/" {
+		t.Fatalf("Expected only root storage mount, got %+v", info.StorageMounts)
 	}
 }
 
@@ -1097,5 +1210,40 @@ func TestShouldSkipFilesystem(t *testing.T) {
 					tc.fstype, tc.mountpoint, result, tc.expected)
 			}
 		})
+	}
+}
+
+func TestStorageProviderPaths(t *testing.T) {
+	provider := MockStorageProvider{
+		partitions: []disk.PartitionStat{
+			{Mountpoint: "/", Fstype: "ext4"},
+			{Mountpoint: "/data", Fstype: "xfs"},
+			{Mountpoint: "/tmp", Fstype: "tmpfs"},
+			{Mountpoint: "/missing", Fstype: "ext4"},
+		},
+		usages: map[string]*disk.UsageStat{
+			"/":     {Total: 100 * bytesPerGB, Used: 25 * bytesPerGB, Free: 75 * bytesPerGB, UsedPercent: 25},
+			"/data": {Total: 200 * bytesPerGB, Used: 80 * bytesPerGB, Free: 120 * bytesPerGB, UsedPercent: 40},
+		},
+	}
+
+	mounts := getStaticStorageInfoWithProvider(provider)
+	if len(mounts) != 2 {
+		t.Fatalf("Expected 2 static storage mounts, got %+v", mounts)
+	}
+
+	usage := updateStorageUsageWithProvider(mounts, provider)
+	if len(usage) != 2 {
+		t.Fatalf("Expected 2 storage usage rows, got %+v", usage)
+	}
+	if usage[0].Path != "/" || usage[0].UsedGB != 25 || usage[1].Path != "/data" || usage[1].UsedPercent != 40 {
+		t.Fatalf("Unexpected storage usage: %+v", usage)
+	}
+
+	if got := getStaticStorageInfoWithProvider(MockStorageProvider{err: errors.New("partition failure")}); got != nil {
+		t.Fatalf("Expected nil mounts on partition error, got %+v", got)
+	}
+	if got := updateStorageUsageWithProvider(nil, provider); got != nil {
+		t.Fatalf("Expected nil usage for no mounts, got %+v", got)
 	}
 }

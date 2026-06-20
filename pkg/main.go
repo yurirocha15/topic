@@ -62,6 +62,10 @@ const (
 	cgroupMemoryStatPath      = "/sys/fs/cgroup/memory.stat"
 	cgroupV1MemoryLimitPath   = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 	cgroupV1MemoryUsagePath   = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+	fsTypeTmpfs               = "tmpfs"
+	fsTypeProc                = "proc"
+	mountProcPath             = "/proc"
+	mountTmpPath              = "/tmp"
 )
 
 // --- Interfaces ---
@@ -125,6 +129,19 @@ type ProcessProvider interface {
 	Processes() ([]ProcessHandle, error)
 }
 
+// HostMetricsProvider exposes host CPU and memory metrics.
+type HostMetricsProvider interface {
+	CPUCounts(logical bool) (int, error)
+	CPUPercent(interval time.Duration, perCPU bool) ([]float64, error)
+	VirtualMemory() (*mem.VirtualMemoryStat, error)
+}
+
+// StorageProvider exposes mounted filesystem metadata and usage.
+type StorageProvider interface {
+	Partitions(all bool) ([]disk.PartitionStat, error)
+	Usage(path string) (*disk.UsageStat, error)
+}
+
 // OSProcessProvider reads process information through gopsutil.
 type OSProcessProvider struct{}
 
@@ -146,6 +163,32 @@ type gopsutilProcessHandle struct {
 
 func (p gopsutilProcessHandle) PID() int32 {
 	return p.Pid
+}
+
+// OSHostMetricsProvider reads host metrics through gopsutil.
+type OSHostMetricsProvider struct{}
+
+func (p OSHostMetricsProvider) CPUCounts(logical bool) (int, error) {
+	return cpu.Counts(logical)
+}
+
+func (p OSHostMetricsProvider) CPUPercent(interval time.Duration, perCPU bool) ([]float64, error) {
+	return cpu.Percent(interval, perCPU)
+}
+
+func (p OSHostMetricsProvider) VirtualMemory() (*mem.VirtualMemoryStat, error) {
+	return mem.VirtualMemory()
+}
+
+// OSStorageProvider reads storage metadata through gopsutil.
+type OSStorageProvider struct{}
+
+func (p OSStorageProvider) Partitions(all bool) ([]disk.PartitionStat, error) {
+	return disk.Partitions(all)
+}
+
+func (p OSStorageProvider) Usage(path string) (*disk.UsageStat, error) {
+	return disk.Usage(path)
 }
 
 // --- Data Structures ---
@@ -1010,7 +1053,11 @@ func makeBar(percent float64, barWidth int) string {
 
 // updateHostCPUUsage fetches current host CPU usage percentage.
 func updateHostCPUUsage() float64 {
-	if percentages, err := cpu.Percent(0, false); err == nil && len(percentages) > 0 {
+	return updateHostCPUUsageWithProvider(OSHostMetricsProvider{})
+}
+
+func updateHostCPUUsageWithProvider(provider HostMetricsProvider) float64 {
+	if percentages, err := provider.CPUPercent(0, false); err == nil && len(percentages) > 0 {
 		return percentages[0]
 	}
 	return 0
@@ -1018,7 +1065,11 @@ func updateHostCPUUsage() float64 {
 
 // updateHostMemUsage fetches current host memory usage in GB.
 func updateHostMemUsage() float64 {
-	if memInfo, err := mem.VirtualMemory(); err == nil {
+	return updateHostMemUsageWithProvider(OSHostMetricsProvider{})
+}
+
+func updateHostMemUsageWithProvider(provider HostMetricsProvider) float64 {
+	if memInfo, err := provider.VirtualMemory(); err == nil {
 		return float64(memInfo.Used) / float64(bytesPerGB)
 	}
 	return 0
@@ -1095,6 +1146,16 @@ func collectDynamicInfoWithTiming(
 
 // getStaticInfo fetches static information about the container and host.
 func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticInfo, error) {
+	return getStaticInfoWithProviders(fs, runner, stater, OSHostMetricsProvider{}, OSStorageProvider{})
+}
+
+func getStaticInfoWithProviders(
+	fs FileReader,
+	runner CommandRunner,
+	stater Stater,
+	hostProvider HostMetricsProvider,
+	storageProvider StorageProvider,
+) (StaticInfo, error) {
 	var info StaticInfo
 	var err error
 	if _, err = stater.Stat(cgroupCPUMaxPath); os.IsNotExist(err) {
@@ -1102,20 +1163,20 @@ func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticIn
 	} else {
 		info.CgroupVersion = CgroupV2
 	}
-	info.HostCores, err = cpu.Counts(false)
+	info.HostCores, err = hostProvider.CPUCounts(false)
 	if err != nil {
 		info.HostCores = 1
 	}
 	info.ContainerCPULimit = getContainerCPULimit(info.CgroupVersion, info.HostCores, fs)
 	info.ContainerMemLimitBytes, info.ContainerMemLimitGB = getContainerMemLimit(info.CgroupVersion, fs)
-	hostMem, hostMemErr := mem.VirtualMemory()
+	hostMem, hostMemErr := hostProvider.VirtualMemory()
 	if hostMemErr == nil {
 		info.HostMemTotalGB = float64(hostMem.Total) / float64(bytesPerGB)
 	} else {
 		info.HostMemTotalGB = 0
 	}
 	info.GPUCount, info.GPUTotalGB = getStaticGPUInfo(runner)
-	info.StorageMounts = getStaticStorageInfo()
+	info.StorageMounts = getStaticStorageInfoWithProvider(storageProvider)
 	return info, err
 }
 
@@ -1273,9 +1334,8 @@ func updateContainerMemUsage(cgroupVersion CgroupVersion, fs FileReader) float64
 	return 0
 }
 
-// getStaticStorageInfo fetches mounted filesystem information.
-func getStaticStorageInfo() []StorageMount {
-	partitions, err := disk.Partitions(false)
+func getStaticStorageInfoWithProvider(provider StorageProvider) []StorageMount {
+	partitions, err := provider.Partitions(false)
 	if err != nil {
 		return nil
 	}
@@ -1287,7 +1347,7 @@ func getStaticStorageInfo() []StorageMount {
 			continue
 		}
 
-		usage, usageErr := disk.Usage(partition.Mountpoint)
+		usage, usageErr := provider.Usage(partition.Mountpoint)
 		if usageErr != nil {
 			continue
 		}
@@ -1307,7 +1367,7 @@ func getStaticStorageInfo() []StorageMount {
 func shouldSkipFilesystem(fstype, mountpoint string) bool {
 	// Skip virtual/temporary filesystems
 	skipFsTypes := []string{
-		"tmpfs", "devtmpfs", "sysfs", "proc", "devpts", "cgroup", "cgroup2",
+		fsTypeTmpfs, "devtmpfs", "sysfs", fsTypeProc, "devpts", "cgroup", "cgroup2",
 		"pstore", "bpf", "debugfs", "tracefs", "securityfs", "fusectl",
 		"configfs", "selinuxfs", "mqueue", "hugetlbfs", "autofs", "rpc_pipefs",
 		"squashfs", "overlayfs",
@@ -1321,7 +1381,7 @@ func shouldSkipFilesystem(fstype, mountpoint string) bool {
 
 	// Skip system mount points
 	skipPaths := []string{
-		"/dev", "/sys", "/proc", "/run", "/tmp", "/var/run", "/var/lock",
+		"/dev", "/sys", mountProcPath, "/run", mountTmpPath, "/var/run", "/var/lock",
 	}
 
 	for _, skip := range skipPaths {
@@ -1340,13 +1400,17 @@ func shouldSkipFilesystem(fstype, mountpoint string) bool {
 
 // updateStorageUsage fetches current storage usage for all monitored mounts.
 func updateStorageUsage(storageMounts []StorageMount) []StorageUsage {
+	return updateStorageUsageWithProvider(storageMounts, OSStorageProvider{})
+}
+
+func updateStorageUsageWithProvider(storageMounts []StorageMount, provider StorageProvider) []StorageUsage {
 	if len(storageMounts) == 0 {
 		return nil
 	}
 
 	usage := make([]StorageUsage, 0, len(storageMounts))
 	for _, mount := range storageMounts {
-		stat, err := disk.Usage(mount.Path)
+		stat, err := provider.Usage(mount.Path)
 		if err != nil {
 			continue
 		}
