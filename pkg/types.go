@@ -48,6 +48,60 @@ type StorageUsage struct {
 	UsedPercent float64
 }
 
+type NetworkUsage struct {
+	Name          string
+	RXBytesPerSec float64
+	TXBytesPerSec float64
+	RXErrors      uint64
+	TXErrors      uint64
+}
+
+type DiskIOUsage struct {
+	Name             string
+	ReadBytesPerSec  float64
+	WriteBytesPerSec float64
+	ReadOpsPerSec    float64
+	WriteOpsPerSec   float64
+}
+
+type CgroupEvents struct {
+	MemoryHigh          uint64
+	MemoryOOM           uint64
+	MemoryOOMKill       uint64
+	CPUThrottledPeriods uint64
+}
+
+type PIDUsage struct {
+	Current uint64
+	Max     uint64
+	MaxText string
+}
+
+type PressureStat struct {
+	Resource  string
+	SomeAvg10 float64
+	FullAvg10 float64
+}
+
+type Alert struct {
+	Level   string
+	Message string
+}
+
+type HistoryRing struct {
+	Values []float64
+	Next   int
+	Filled bool
+}
+
+type MetricsHistory struct {
+	CPU     HistoryRing
+	Memory  HistoryRing
+	GPU     HistoryRing
+	Network HistoryRing
+	DiskIO  HistoryRing
+}
+
 // BarLayout holds information about how bars should be arranged.
 type BarLayout struct {
 	Columns       int
@@ -125,6 +179,12 @@ type DynamicInfo struct {
 	HostMemUsedGB      float64
 	LiveGPUUsage       []GPUUsage
 	StorageUsage       []StorageUsage
+	NetworkUsage       []NetworkUsage
+	DiskIOUsage        []DiskIOUsage
+	CgroupEvents       CgroupEvents
+	PIDUsage           PIDUsage
+	Pressure           []PressureStat
+	Alerts             []Alert
 	Processes          []ProcessInfo
 }
 
@@ -135,6 +195,12 @@ type DynamicSnapshot struct {
 	HostMemUsedGB      float64
 	LiveGPUUsage       []GPUUsage
 	StorageUsage       []StorageUsage
+	NetworkUsage       []NetworkUsage
+	DiskIOUsage        []DiskIOUsage
+	CgroupEvents       CgroupEvents
+	PIDUsage           PIDUsage
+	Pressure           []PressureStat
+	Alerts             []Alert
 	Processes          []ProcessInfo
 }
 
@@ -143,6 +209,11 @@ type DynamicCollectorSet struct {
 	ContainerMem func() float64
 	LiveGPU      func() []GPUUsage
 	Storage      func() []StorageUsage
+	Network      func() []NetworkUsage
+	DiskIO       func() []DiskIOUsage
+	CgroupEvents func() CgroupEvents
+	PIDs         func() PIDUsage
+	Pressure     func() []PressureStat
 	Processes    func() []ProcessInfo
 	HostCPU      func() float64
 	HostMem      func() float64
@@ -155,4 +226,23 @@ type State struct {
 	ui           UIState
 	prevCPUUsage uint64
 	prevCPUTime  time.Time
+	prevNetwork  map[string]NetworkCounter
+	prevDiskIO   map[string]DiskIOCounter
+	prevNetTime  time.Time
+	prevDiskTime time.Time
+	history      MetricsHistory
+}
+
+type NetworkCounter struct {
+	RXBytes uint64
+	TXBytes uint64
+	RXErrs  uint64
+	TXErrs  uint64
+}
+
+type DiskIOCounter struct {
+	ReadBytes  uint64
+	WriteBytes uint64
+	ReadCount  uint64
+	WriteCount uint64
 }

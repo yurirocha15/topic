@@ -2,8 +2,11 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/rivo/tview"
+	"github.com/shirou/gopsutil/v3/disk"
+	netio "github.com/shirou/gopsutil/v3/net"
 )
 
 func BenchmarkMakeBar(b *testing.B) {
@@ -256,5 +259,54 @@ func BenchmarkUpdateContainerMemUsage(b *testing.B) {
 
 	for range b.N {
 		_ = updateContainerMemUsage(CgroupV2, fs)
+	}
+}
+
+func BenchmarkNetworkAndDiskCollectors(b *testing.B) {
+	state := &State{
+		prevNetwork: map[string]NetworkCounter{
+			"eth0": {RXBytes: 1000, TXBytes: 2000},
+		},
+		prevDiskIO: map[string]DiskIOCounter{
+			"sda": {ReadBytes: 1000, WriteBytes: 2000, ReadCount: 10, WriteCount: 20},
+		},
+		prevNetTime:  time.Now().Add(-time.Second),
+		prevDiskTime: time.Now().Add(-time.Second),
+	}
+	networkProvider := MockNetworkProvider{counters: []netio.IOCountersStat{
+		{Name: "eth0", BytesRecv: 3000, BytesSent: 5000},
+	}}
+	diskProvider := MockDiskIOProvider{counters: map[string]disk.IOCountersStat{
+		"sda": {ReadBytes: 5000, WriteBytes: 7000, ReadCount: 30, WriteCount: 60},
+	}}
+
+	for range b.N {
+		_ = updateNetworkUsageWithProvider(state, networkProvider)
+		_ = updateDiskIOUsageWithProvider(state, diskProvider)
+	}
+}
+
+func BenchmarkHistorySparkline(b *testing.B) {
+	var ring HistoryRing
+	for i := range historySize {
+		ring.Add(float64(i))
+	}
+
+	for range b.N {
+		_ = sparkline(ring)
+	}
+}
+
+func BenchmarkEvaluateAlerts(b *testing.B) {
+	staticInfo := StaticInfo{ContainerMemLimitBytes: 10 * bytesPerGB}
+	dynamic := DynamicSnapshot{
+		ContainerMemUsedGB: 9.6,
+		CgroupEvents:       CgroupEvents{MemoryOOMKill: 1, CPUThrottledPeriods: 2},
+		PIDUsage:           PIDUsage{Current: 9, Max: 10},
+		Pressure:           []PressureStat{{Resource: "cpu", SomeAvg10: 12}},
+	}
+
+	for range b.N {
+		_ = evaluateAlerts(staticInfo, dynamic)
 	}
 }

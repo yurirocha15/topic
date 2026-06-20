@@ -14,6 +14,7 @@ import (
 	"github.com/rivo/tview"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
+	netio "github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -198,6 +199,24 @@ func (msp MockStorageProvider) Usage(path string) (*disk.UsageStat, error) {
 		return nil, errors.New("missing usage")
 	}
 	return usage, nil
+}
+
+type MockNetworkProvider struct {
+	counters []netio.IOCountersStat
+	err      error
+}
+
+func (mnp MockNetworkProvider) IOCounters(_ bool) ([]netio.IOCountersStat, error) {
+	return mnp.counters, mnp.err
+}
+
+type MockDiskIOProvider struct {
+	counters map[string]disk.IOCountersStat
+	err      error
+}
+
+func (mdp MockDiskIOProvider) IOCounters(_ ...string) (map[string]disk.IOCountersStat, error) {
+	return mdp.counters, mdp.err
 }
 
 // MockStater simulates os.Stat for testing cgroup version detection.
@@ -1414,6 +1433,8 @@ func TestNewDynamicCollectorSetSelectsRequiredCollectors(t *testing.T) {
 		MockHostMetricsProvider{},
 		MockStorageProvider{},
 		MockProcessProvider{},
+		MockNetworkProvider{},
+		MockDiskIOProvider{},
 	)
 	if collectors.ContainerCPU == nil || collectors.ContainerMem == nil || collectors.LiveGPU == nil {
 		t.Fatal("Expected limited container with GPU to collect container CPU, container memory, and live GPU")
@@ -1433,6 +1454,8 @@ func TestNewDynamicCollectorSetSelectsRequiredCollectors(t *testing.T) {
 		MockHostMetricsProvider{},
 		MockStorageProvider{},
 		MockProcessProvider{},
+		MockNetworkProvider{},
+		MockDiskIOProvider{},
 	)
 	if collectors.ContainerCPU != nil || collectors.ContainerMem != nil || collectors.LiveGPU != nil {
 		t.Fatal("Did not expect container or GPU collectors when host resources are displayed and no GPU is present")
@@ -1549,5 +1572,108 @@ func TestStorageProviderPaths(t *testing.T) {
 	}
 	if got := updateStorageUsageWithProvider(nil, provider); got != nil {
 		t.Fatalf("Expected nil usage for no mounts, got %+v", got)
+	}
+}
+
+func TestNetworkAndDiskIORates(t *testing.T) {
+	state := &State{
+		prevNetwork: map[string]NetworkCounter{
+			"eth0": {RXBytes: 1000, TXBytes: 2000},
+		},
+		prevDiskIO: map[string]DiskIOCounter{
+			"sda": {ReadBytes: 1000, WriteBytes: 2000, ReadCount: 10, WriteCount: 20},
+		},
+		prevNetTime:  time.Now().Add(-time.Second),
+		prevDiskTime: time.Now().Add(-time.Second),
+	}
+
+	network := updateNetworkUsageWithProvider(state, MockNetworkProvider{
+		counters: []netio.IOCountersStat{
+			{Name: "lo", BytesRecv: 999, BytesSent: 999},
+			{Name: "eth0", BytesRecv: 3000, BytesSent: 5000, Errin: 1, Errout: 2},
+		},
+	})
+	if len(network) != 1 || network[0].Name != "eth0" || network[0].RXBytesPerSec <= 0 || network[0].TXErrors != 2 {
+		t.Fatalf("Unexpected network usage: %+v", network)
+	}
+
+	diskUsage := updateDiskIOUsageWithProvider(state, MockDiskIOProvider{
+		counters: map[string]disk.IOCountersStat{
+			"sda": {ReadBytes: 5000, WriteBytes: 7000, ReadCount: 30, WriteCount: 60},
+		},
+	})
+	if len(diskUsage) != 1 || diskUsage[0].Name != "sda" ||
+		diskUsage[0].ReadBytesPerSec <= 0 || diskUsage[0].WriteOpsPerSec <= 0 {
+		t.Fatalf("Unexpected disk I/O usage: %+v", diskUsage)
+	}
+}
+
+func TestCgroupEventsPIDsAndPressure(t *testing.T) {
+	fs := MockFileReader{files: map[string]string{
+		cgroupMemoryEventsPath:   "high 2\noom 3\noom_kill 1\nbad nope\n",
+		cgroupCPUStatPath:        "usage_usec 1\nnr_throttled 4\n",
+		cgroupPIDsCurrentPath:    "8",
+		cgroupPIDsMaxPath:        "10",
+		cgroupCPUPressurePath:    "some avg10=12.50 avg60=1.00 avg300=0.00 total=1\nfull avg10=3.00 avg60=0.00 avg300=0.00 total=1\n",
+		cgroupMemoryPressurePath: "some avg10=0.50 avg60=0.00 avg300=0.00 total=1\n",
+		cgroupIOPressurePath:     "full avg10=2.00 avg60=0.00 avg300=0.00 total=1\n",
+	}}
+
+	events := updateCgroupEvents(CgroupV2, fs)
+	if events.MemoryHigh != 2 || events.MemoryOOM != 3 || events.MemoryOOMKill != 1 || events.CPUThrottledPeriods != 4 {
+		t.Fatalf("Unexpected cgroup events: %+v", events)
+	}
+	pids := updatePIDUsage(fs)
+	if pids.Current != 8 || pids.Max != 10 || pids.MaxText != "10" {
+		t.Fatalf("Unexpected PID usage: %+v", pids)
+	}
+	pressure := updatePressure(fs)
+	if len(pressure) != 3 || pressure[0].Resource != "cpu" || pressure[0].SomeAvg10 != 12.5 {
+		t.Fatalf("Unexpected pressure stats: %+v", pressure)
+	}
+}
+
+func TestMetricsHistoryAlertsAndRender(t *testing.T) {
+	staticInfo := StaticInfo{ContainerMemLimitBytes: 10 * bytesPerGB}
+	dynamic := DynamicSnapshot{
+		ContainerCPUUsage:  50,
+		ContainerMemUsedGB: 9.6,
+		LiveGPUUsage:       []GPUUsage{{Utilization: 70}},
+		NetworkUsage: []NetworkUsage{
+			{
+				Name:          "eth0",
+				RXBytesPerSec: bytesPerSecondToMiBSecond,
+				TXBytesPerSec: bytesPerSecondToMiBSecond,
+			},
+		},
+		DiskIOUsage:  []DiskIOUsage{{Name: "sda", ReadBytesPerSec: bytesPerSecondToMiBSecond}},
+		CgroupEvents: CgroupEvents{MemoryOOMKill: 1, CPUThrottledPeriods: 2},
+		PIDUsage:     PIDUsage{Current: 9, Max: 10, MaxText: "10"},
+		Pressure:     []PressureStat{{Resource: "cpu", SomeAvg10: 12}},
+	}
+	alerts := evaluateAlerts(staticInfo, dynamic)
+	if len(alerts) < 4 {
+		t.Fatalf("Expected multiple alerts, got %+v", alerts)
+	}
+
+	var history MetricsHistory
+	updateMetricsHistory(&history, staticInfo, dynamic)
+	state := &State{
+		static:  staticInfo,
+		history: history,
+		dynamic: DynamicInfo{
+			NetworkUsage: dynamic.NetworkUsage,
+			DiskIOUsage:  dynamic.DiskIOUsage,
+			CgroupEvents: dynamic.CgroupEvents,
+			PIDUsage:     dynamic.PIDUsage,
+			Pressure:     dynamic.Pressure,
+			Alerts:       alerts,
+		},
+	}
+	text := buildMetricsSection(state)
+	for _, want := range []string{"ALERT", "PIDS", "NET eth0", "IO sda", "PSI", "HIST CPU"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("Expected metrics section to contain %q, got %q", want, text)
+		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
+	netio "github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -93,6 +94,14 @@ type StorageProvider interface {
 	Usage(path string) (*disk.UsageStat, error)
 }
 
+type NetworkProvider interface {
+	IOCounters(pernic bool) ([]netio.IOCountersStat, error)
+}
+
+type DiskIOProvider interface {
+	IOCounters(names ...string) (map[string]disk.IOCountersStat, error)
+}
+
 // OSProcessProvider reads process information through gopsutil.
 type OSProcessProvider struct{}
 
@@ -151,4 +160,16 @@ func (p OSStorageProvider) Partitions(all bool) ([]disk.PartitionStat, error) {
 
 func (p OSStorageProvider) Usage(path string) (*disk.UsageStat, error) {
 	return disk.Usage(path)
+}
+
+type OSNetworkProvider struct{}
+
+func (p OSNetworkProvider) IOCounters(pernic bool) ([]netio.IOCountersStat, error) {
+	return netio.IOCounters(pernic)
+}
+
+type OSDiskIOProvider struct{}
+
+func (p OSDiskIOProvider) IOCounters(names ...string) (map[string]disk.IOCountersStat, error) {
+	return disk.IOCounters(names...)
 }

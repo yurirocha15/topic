@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/rivo/tview"
@@ -109,6 +110,7 @@ func buildResourceText(availableWidth int, state *State) string {
 	if len(gpuBars) > 0 {
 		builder.WriteString(buildGPUSectionBars(sharedLayout, gpuBars))
 	}
+	builder.WriteString(buildMetricsSection(state))
 
 	return builder.String()
 }
@@ -334,6 +336,83 @@ func buildBarSection(layout BarLayout, bars []BarData) string {
 		}
 	}
 
+	return builder.String()
+}
+
+func buildMetricsSection(state *State) string {
+	if len(state.dynamic.NetworkUsage) == 0 &&
+		len(state.dynamic.DiskIOUsage) == 0 &&
+		state.dynamic.PIDUsage.Current == 0 &&
+		len(state.dynamic.Pressure) == 0 &&
+		len(state.dynamic.Alerts) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString("\n")
+	if len(state.dynamic.Alerts) > 0 {
+		for _, alert := range state.dynamic.Alerts {
+			builder.WriteString("[red]ALERT[white] ")
+			builder.WriteString(alert.Level)
+			builder.WriteString(": ")
+			builder.WriteString(alert.Message)
+			builder.WriteString("\n")
+		}
+	}
+	if pid := state.dynamic.PIDUsage; pid.Current > 0 {
+		maxText := pid.MaxText
+		if maxText == "" && pid.Max > 0 {
+			maxText = strconv.FormatUint(pid.Max, 10)
+		}
+		if maxText == "" {
+			maxText = "unknown"
+		}
+		fmt.Fprintf(&builder, "PIDS: [yellow]%d / %s[white]\n", pid.Current, maxText)
+	}
+	if len(state.dynamic.NetworkUsage) > 0 {
+		network := state.dynamic.NetworkUsage[0]
+		fmt.Fprintf(
+			&builder,
+			"NET %s: [yellow]RX %.2f MiB/s TX %.2f MiB/s[white] %s\n",
+			network.Name,
+			network.RXBytesPerSec/bytesPerSecondToMiBSecond,
+			network.TXBytesPerSec/bytesPerSecondToMiBSecond,
+			sparkline(state.history.Network),
+		)
+	}
+	if len(state.dynamic.DiskIOUsage) > 0 {
+		disk := state.dynamic.DiskIOUsage[0]
+		fmt.Fprintf(
+			&builder,
+			"IO %s: [yellow]R %.2f MiB/s W %.2f MiB/s[white] %s\n",
+			disk.Name,
+			disk.ReadBytesPerSec/bytesPerSecondToMiBSecond,
+			disk.WriteBytesPerSec/bytesPerSecondToMiBSecond,
+			sparkline(state.history.DiskIO),
+		)
+	}
+	if len(state.dynamic.Pressure) > 0 {
+		builder.WriteString("PSI:")
+		for _, pressure := range state.dynamic.Pressure {
+			fmt.Fprintf(
+				&builder,
+				" %s some %.1f full %.1f",
+				pressure.Resource,
+				pressure.SomeAvg10,
+				pressure.FullAvg10,
+			)
+		}
+		builder.WriteString("\n")
+	}
+	if state.history.CPU.Next > 0 || state.history.CPU.Filled {
+		fmt.Fprintf(
+			&builder,
+			"HIST CPU %s MEM %s GPU %s\n",
+			sparkline(state.history.CPU),
+			sparkline(state.history.Memory),
+			sparkline(state.history.GPU),
+		)
+	}
 	return builder.String()
 }
 

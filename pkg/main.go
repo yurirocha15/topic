@@ -22,7 +22,7 @@ const (
 	minGPUUsageCount          = 2                 // For nvidia-smi GPU usage
 	minGPUInfoCount           = 5                 // For nvidia-smi pmon
 	barsPerGPU                = 2                 // GPU utilization and memory bars
-	dynamicCollectorCount     = 7                 // Number of dynamic collectors in updateAll
+	dynamicCollectorCount     = 12                // Number of dynamic collectors in updateAll
 	percentMultiplier         = 100.0             // Multiplier for percentage calculations
 	bytesPerKB                = 1024              // Bytes per kilobyte
 	bytesPerMB                = bytesPerKB * 1024 // Bytes per megabyte
@@ -49,7 +49,13 @@ const (
 	cgroupV1CPUPeriodPath     = "/sys/fs/cgroup/cpu/cpu.cfs_period_us"
 	cgroupV1CPUUsagePath      = "/sys/fs/cgroup/cpuacct/cpuacct.usage"
 	cgroupMemoryMaxPath       = "/sys/fs/cgroup/memory.max"
+	cgroupMemoryEventsPath    = "/sys/fs/cgroup/memory.events"
 	cgroupMemoryStatPath      = "/sys/fs/cgroup/memory.stat"
+	cgroupPIDsCurrentPath     = "/sys/fs/cgroup/pids.current"
+	cgroupPIDsMaxPath         = "/sys/fs/cgroup/pids.max"
+	cgroupCPUPressurePath     = "/sys/fs/cgroup/cpu.pressure"
+	cgroupMemoryPressurePath  = "/sys/fs/cgroup/memory.pressure"
+	cgroupIOPressurePath      = "/sys/fs/cgroup/io.pressure"
 	cgroupV1MemoryLimitPath   = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 	cgroupV1MemoryUsagePath   = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
 	fsTypeTmpfs               = "tmpfs"

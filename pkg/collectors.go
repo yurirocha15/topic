@@ -26,7 +26,16 @@ func updateHostMemUsageWithProvider(provider HostMetricsProvider) float64 {
 
 // updateAll fetches all dynamic data and updates the state.
 func updateAll(state *State, fs FileReader, runner CommandRunner) {
-	updateAllWithProviders(state, fs, runner, OSHostMetricsProvider{}, OSStorageProvider{}, OSProcessProvider{})
+	updateAllWithProviders(
+		state,
+		fs,
+		runner,
+		OSHostMetricsProvider{},
+		OSStorageProvider{},
+		OSProcessProvider{},
+		OSNetworkProvider{},
+		OSDiskIOProvider{},
+	)
 }
 
 func updateAllWithProviders(
@@ -36,6 +45,8 @@ func updateAllWithProviders(
 	hostProvider HostMetricsProvider,
 	storageProvider StorageProvider,
 	processProvider ProcessProvider,
+	networkProvider NetworkProvider,
+	diskIOProvider DiskIOProvider,
 ) {
 	staticInfo := state.static
 	dynamic := collectDynamicInfo(newDynamicCollectorSet(
@@ -46,13 +57,23 @@ func updateAllWithProviders(
 		hostProvider,
 		storageProvider,
 		processProvider,
+		networkProvider,
+		diskIOProvider,
 	))
+	dynamic.Alerts = evaluateAlerts(staticInfo, dynamic)
 
 	state.dynamic.mu.Lock()
+	updateMetricsHistory(&state.history, staticInfo, dynamic)
 	state.dynamic.ContainerCPUUsage = dynamic.ContainerCPUUsage
 	state.dynamic.ContainerMemUsedGB = dynamic.ContainerMemUsedGB
 	state.dynamic.LiveGPUUsage = dynamic.LiveGPUUsage
 	state.dynamic.StorageUsage = dynamic.StorageUsage
+	state.dynamic.NetworkUsage = dynamic.NetworkUsage
+	state.dynamic.DiskIOUsage = dynamic.DiskIOUsage
+	state.dynamic.CgroupEvents = dynamic.CgroupEvents
+	state.dynamic.PIDUsage = dynamic.PIDUsage
+	state.dynamic.Pressure = dynamic.Pressure
+	state.dynamic.Alerts = dynamic.Alerts
 	state.dynamic.Processes = dynamic.Processes
 	state.dynamic.HostCPUUsage = dynamic.HostCPUUsage
 	state.dynamic.HostMemUsedGB = dynamic.HostMemUsedGB
@@ -67,10 +88,27 @@ func newDynamicCollectorSet(
 	hostProvider HostMetricsProvider,
 	storageProvider StorageProvider,
 	processProvider ProcessProvider,
+	networkProvider NetworkProvider,
+	diskIOProvider DiskIOProvider,
 ) DynamicCollectorSet {
 	collectors := DynamicCollectorSet{
 		Storage: func() []StorageUsage {
 			return updateStorageUsageWithProvider(staticInfo.StorageMounts, storageProvider)
+		},
+		Network: func() []NetworkUsage {
+			return updateNetworkUsageWithProvider(state, networkProvider)
+		},
+		DiskIO: func() []DiskIOUsage {
+			return updateDiskIOUsageWithProvider(state, diskIOProvider)
+		},
+		CgroupEvents: func() CgroupEvents {
+			return updateCgroupEvents(staticInfo.CgroupVersion, fs)
+		},
+		PIDs: func() PIDUsage {
+			return updatePIDUsage(fs)
+		},
+		Pressure: func() []PressureStat {
+			return updatePressure(fs)
 		},
 		Processes: func() []ProcessInfo {
 			return updateProcessListWithProvider(&staticInfo, runner, processProvider)
@@ -119,6 +157,11 @@ func collectDynamicInfo(collectors DynamicCollectorSet) DynamicSnapshot {
 	return dynamic
 }
 
+type collectorEntry struct {
+	name    string
+	collect func()
+}
+
 func collectDynamicInfoWithTiming(
 	collectors DynamicCollectorSet,
 	now func() time.Time,
@@ -142,10 +185,16 @@ func collectDynamicInfoWithTiming(
 		timingMu.Unlock()
 	}
 
-	type collectorEntry struct {
-		name    string
-		collect func()
+	for _, entry := range dynamicCollectorEntries(collectors, &dynamic) {
+		wg.Add(1)
+		go run(entry.name, entry.collect)
 	}
+	wg.Wait()
+
+	return dynamic, timings
+}
+
+func dynamicCollectorEntries(collectors DynamicCollectorSet, dynamic *DynamicSnapshot) []collectorEntry {
 	collectorEntries := make([]collectorEntry, 0, dynamicCollectorCount)
 	if collectors.ContainerCPU != nil {
 		collectorEntries = append(collectorEntries, collectorEntry{
@@ -171,6 +220,36 @@ func collectDynamicInfoWithTiming(
 			collect: func() { dynamic.StorageUsage = collectors.Storage() },
 		})
 	}
+	if collectors.Network != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "network",
+			collect: func() { dynamic.NetworkUsage = collectors.Network() },
+		})
+	}
+	if collectors.DiskIO != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "disk_io",
+			collect: func() { dynamic.DiskIOUsage = collectors.DiskIO() },
+		})
+	}
+	if collectors.CgroupEvents != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "cgroup_events",
+			collect: func() { dynamic.CgroupEvents = collectors.CgroupEvents() },
+		})
+	}
+	if collectors.PIDs != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "pids",
+			collect: func() { dynamic.PIDUsage = collectors.PIDs() },
+		})
+	}
+	if collectors.Pressure != nil {
+		collectorEntries = append(collectorEntries, collectorEntry{
+			name:    "pressure",
+			collect: func() { dynamic.Pressure = collectors.Pressure() },
+		})
+	}
 	if collectors.Processes != nil {
 		collectorEntries = append(collectorEntries, collectorEntry{
 			name:    "processes",
@@ -189,14 +268,7 @@ func collectDynamicInfoWithTiming(
 			collect: func() { dynamic.HostMemUsedGB = collectors.HostMem() },
 		})
 	}
-
-	for _, entry := range collectorEntries {
-		wg.Add(1)
-		go run(entry.name, entry.collect)
-	}
-	wg.Wait()
-
-	return dynamic, timings
+	return collectorEntries
 }
 
 // getStaticInfo fetches static information about the container and host.
