@@ -779,6 +779,128 @@ func TestSortModeInputRouting(t *testing.T) {
 	}
 }
 
+func TestTUIInputCaptureDoesNotDeadlock(t *testing.T) {
+	state := &State{
+		ui: UIState{ProcessSort: SortByCPU},
+		dynamic: DynamicInfo{
+			Processes: []ProcessInfo{
+				{PID: 123, User: "root", CPUPercent: 12.3, MemPercent: 4.5, Command: "sleep"},
+			},
+		},
+	}
+	app := tview.NewApplication()
+	screen := tcell.NewSimulationScreen("UTF-8")
+	screen.SetSize(100, 32)
+	table := tview.NewTable().
+		SetSelectable(true, false).
+		SetFixed(1, 0)
+	table.SetBorder(true).SetTitle(" Processes ")
+	mainLayout := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(table, 0, 1, true)
+	pages := tview.NewPages().
+		AddPage("main", mainLayout, true, true)
+	render := func() {
+		updateProcessTable(table, state)
+	}
+	render()
+	table.Select(1, 0)
+	setAppInputCapture(app, state, pages, table, &MockProcessSignaler{}, render)
+	app.SetScreen(screen).SetRoot(pages, true)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run()
+	}()
+	defer func() {
+		go app.Stop()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+	}()
+
+	waitForTUICondition(t, app, func() bool {
+		return table.HasFocus()
+	}, "process table focus")
+
+	screen.InjectKey(tcell.KeyEnter, 0, tcell.ModNone)
+	waitForTUICondition(t, app, func() bool {
+		return pages.HasPage("process-details")
+	}, "process details modal to open")
+
+	screen.InjectKey(tcell.KeyEnter, 0, tcell.ModNone)
+	waitForTUICondition(t, app, func() bool {
+		return !pages.HasPage("process-details")
+	}, "process details modal to close")
+
+	screen.InjectKey(tcell.KeyRune, 's', tcell.ModNone)
+	waitForTUICondition(t, app, func() bool {
+		return state.ui.SortMode
+	}, "sort mode to start")
+	screen.InjectKey(tcell.KeyRight, 0, tcell.ModNone)
+	waitForTUICondition(t, app, func() bool {
+		return state.ui.ProcessSort == SortByMemory
+	}, "sort mode right arrow")
+	screen.InjectKey(tcell.KeyEsc, 0, tcell.ModNone)
+	waitForTUICondition(t, app, func() bool {
+		return !state.ui.SortMode
+	}, "sort mode to exit")
+
+	screen.InjectKey(tcell.KeyRune, '/', tcell.ModNone)
+	screen.InjectKey(tcell.KeyRune, 'p', tcell.ModNone)
+	waitForTUICondition(t, app, func() bool {
+		return state.ui.SearchMode && state.ui.ProcessFilter == "p"
+	}, "filter mode typed input")
+	screen.InjectKey(tcell.KeyEsc, 0, tcell.ModNone)
+	waitForTUICondition(t, app, func() bool {
+		return !state.ui.SearchMode
+	}, "filter mode to exit")
+
+	screen.InjectKey(tcell.KeyCtrlC, 0, tcell.ModNone)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("TUI run returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("TUI did not stop after Ctrl+C")
+	}
+}
+
+func waitForTUICondition(t *testing.T, app *tview.Application, condition func() bool, description string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var ok bool
+		if !queueTUIUpdate(t, app, func() {
+			ok = condition()
+		}) {
+			t.Fatalf("TUI event loop did not process update while waiting for %s", description)
+		}
+		if ok {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("Timed out waiting for %s", description)
+}
+
+func queueTUIUpdate(t *testing.T, app *tview.Application, update func()) bool {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		app.QueueUpdate(update)
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(250 * time.Millisecond):
+		return false
+	}
+}
+
 func TestUpdateProcessListWithProvider(t *testing.T) {
 	staticInfo := &StaticInfo{
 		ContainerCPULimit:      2,

@@ -10,6 +10,23 @@ import (
 	"github.com/rivo/tview"
 )
 
+func setAppInputCapture(
+	app *tview.Application,
+	state *State,
+	pages *tview.Pages,
+	processTable *tview.Table,
+	signaler ProcessSignaler,
+	render func(),
+) {
+	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		nextEvent := handleInput(event, state, app, pages, processTable, signaler)
+		if nextEvent == nil {
+			render()
+		}
+		return nextEvent
+	})
+}
+
 func handleInput(
 	event *tcell.EventKey,
 	state *State,
@@ -69,12 +86,15 @@ func handleInput(
 		return nil
 	case event.Rune() == '?':
 		showHelp(pages)
+		app.SetFocus(pages)
 		return nil
 	case event.Key() == tcell.KeyEnter:
 		showProcessDetails(pages, state, processTable)
+		app.SetFocus(pages)
 		return nil
 	case event.Rune() == 'k':
 		showSignalDialog(pages, state, processTable, signaler)
+		app.SetFocus(pages)
 		return nil
 	case event.Rune() == 'a':
 		updateUIState(state, func(ui *UIState) {
@@ -132,6 +152,7 @@ func handleModalInput(
 	}
 	if event.Key() == tcell.KeyEsc || event.Rune() == 'q' {
 		pages.RemovePage(name)
+		app.SetFocus(pages)
 		return true, nil
 	}
 	return true, event

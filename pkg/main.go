@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -175,13 +174,7 @@ func main() {
 		}
 	}()
 
-	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		nextEvent := handleInput(event, state, app, pages, processTable, OSProcessSignaler{})
-		if nextEvent == nil {
-			app.QueueUpdateDraw(render)
-		}
-		return nextEvent
-	})
+	setAppInputCapture(app, state, pages, processTable, OSProcessSignaler{}, render)
 
 	// Initial data load and draw
 	updateAll(state, fileReader, cmdRunner)
