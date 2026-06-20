@@ -34,6 +34,32 @@ func (mfs MockFileReader) ReadFile(path string) ([]byte, error) {
 	return nil, fmt.Errorf("file not found in mock: %s", path)
 }
 
+type fakeFileInfo struct{}
+
+func (fakeFileInfo) Name() string {
+	return "fake"
+}
+
+func (fakeFileInfo) Size() int64 {
+	return 0
+}
+
+func (fakeFileInfo) Mode() os.FileMode {
+	return 0
+}
+
+func (fakeFileInfo) ModTime() time.Time {
+	return time.Time{}
+}
+
+func (fakeFileInfo) IsDir() bool {
+	return false
+}
+
+func (fakeFileInfo) Sys() any {
+	return nil
+}
+
 // MockCommandRunner simulates running external commands.
 type MockCommandRunner struct {
 	outputs map[string]string // Maps a command string to its output
@@ -2037,6 +2063,265 @@ func TestIntegrationParsingAndStatusText(t *testing.T) {
 	})
 	if !strings.Contains(text, "docker=+") || !strings.Contains(text, "kubernetes=-") {
 		t.Fatalf("Unexpected integration status text: %q", text)
+	}
+}
+
+func TestDiscoverDockerMetadataWithHooks(t *testing.T) {
+	containerID := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	fs := MockFileReader{files: map[string]string{
+		procSelfCgroupPath: "0::/docker/" + containerID,
+	}}
+
+	probe := integrationProbe{
+		stat: func(path string) (os.FileInfo, error) {
+			if path == dockerSocketPath {
+				return fakeFileInfo{}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+		queryDocker: func(id string) (ContainerMetadata, error) {
+			if id != containerID {
+				t.Fatalf("Expected docker query for container %q, got %q", containerID, id)
+			}
+			return ContainerMetadata{Name: "topic", Image: "topic:latest"}, nil
+		},
+	}
+	metadata, status := discoverDockerMetadataWithProbe(fs, AppConfig{}, probe)
+	if !status.Available || status.Detail != integrationAvailable {
+		t.Fatalf("Expected available Docker status, got %+v", status)
+	}
+	if metadata.Runtime != integrationDocker || metadata.Name != "topic" || metadata.Image != "topic:latest" {
+		t.Fatalf("Unexpected Docker metadata: %+v", metadata)
+	}
+
+	_, status = discoverDockerMetadataWithProbe(fs, AppConfig{DisableDocker: true}, probe)
+	if status.Available || status.Detail != integrationDisabled {
+		t.Fatalf("Expected disabled Docker status, got %+v", status)
+	}
+
+	unavailableProbe := integrationProbe{
+		stat: func(_ string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		},
+	}
+	_, status = discoverDockerMetadataWithProbe(fs, AppConfig{}, unavailableProbe)
+	if status.Available || status.Detail != integrationUnavailable {
+		t.Fatalf("Expected unavailable Docker status, got %+v", status)
+	}
+}
+
+func TestDiscoverDockerMetadataQueryError(t *testing.T) {
+	fs := MockFileReader{files: map[string]string{
+		procSelfCgroupPath: "0::/docker/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}}
+	probe := integrationProbe{
+		stat: func(path string) (os.FileInfo, error) {
+			if path == dockerSocketPath {
+				return fakeFileInfo{}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+		queryDocker: func(_ string) (ContainerMetadata, error) {
+			return ContainerMetadata{}, errors.New("docker exploded")
+		},
+	}
+	_, status := discoverDockerMetadataWithProbe(fs, AppConfig{}, probe)
+	if status.Available || !strings.Contains(status.Detail, "docker exploded") {
+		t.Fatalf("Expected Docker query error status, got %+v", status)
+	}
+}
+
+func TestDiscoverKubernetesMetadataWithHooks(t *testing.T) {
+	env := map[string]string{
+		kubernetesServiceHostEnv: "10.0.0.1",
+		kubernetesPodNameEnv:     "topic-pod",
+		kubernetesNodeNameEnv:    "node-a",
+	}
+	fs := MockFileReader{files: map[string]string{
+		kubernetesNamespacePath: "default\n",
+		kubernetesTokenPath:     "token\n",
+	}}
+	probe := integrationProbe{
+		getenv: func(key string) string {
+			return env[key]
+		},
+		queryKubernetes: func(
+			_ FileReader,
+			host string,
+			namespace string,
+			pod string,
+			token string,
+		) (ContainerMetadata, error) {
+			if host != "10.0.0.1" || namespace != "default" || pod != "topic-pod" || token != "token" {
+				t.Fatalf(
+					"Unexpected Kubernetes query args host=%q namespace=%q pod=%q token=%q",
+					host,
+					namespace,
+					pod,
+					token,
+				)
+			}
+			return ContainerMetadata{
+				Name:   "topic-pod",
+				Image:  "topic:latest",
+				Labels: map[string]string{"app": "topic"},
+			}, nil
+		},
+	}
+	metadata, status := discoverKubernetesMetadataWithProbe(fs, AppConfig{}, probe)
+	if !status.Available || status.Detail != integrationAvailable {
+		t.Fatalf("Expected available Kubernetes status, got %+v", status)
+	}
+	if metadata.Runtime != integrationKubernetes ||
+		metadata.Namespace != "default" ||
+		metadata.Pod != "topic-pod" ||
+		metadata.Node != "node-a" ||
+		metadata.Image != "topic:latest" ||
+		metadata.Labels["app"] != "topic" {
+		t.Fatalf("Unexpected Kubernetes metadata: %+v", metadata)
+	}
+
+	_, status = discoverKubernetesMetadataWithProbe(fs, AppConfig{DisableKubernetes: true}, probe)
+	if status.Available || status.Detail != integrationDisabled {
+		t.Fatalf("Expected disabled Kubernetes status, got %+v", status)
+	}
+}
+
+func TestDiscoverKubernetesMetadataUnavailableAndPartialFiles(t *testing.T) {
+	unavailableProbe := integrationProbe{
+		getenv: func(_ string) string {
+			return ""
+		},
+	}
+	_, status := discoverKubernetesMetadataWithProbe(MockFileReader{}, AppConfig{}, unavailableProbe)
+	if status.Available || status.Detail != integrationUnavailable {
+		t.Fatalf("Expected unavailable Kubernetes status, got %+v", status)
+	}
+
+	partialProbe := integrationProbe{
+		getenv: func(key string) string {
+			switch key {
+			case kubernetesServiceHostEnv:
+				return "10.0.0.1"
+			case kubernetesPodNameEnv:
+				return "topic-pod"
+			default:
+				return ""
+			}
+		},
+	}
+	_, status = discoverKubernetesMetadataWithProbe(MockFileReader{}, AppConfig{}, partialProbe)
+	if status.Available || status.Detail != "namespace not available" {
+		t.Fatalf("Expected missing namespace status, got %+v", status)
+	}
+
+	fs := MockFileReader{files: map[string]string{kubernetesNamespacePath: "default"}}
+	_, status = discoverKubernetesMetadataWithProbe(fs, AppConfig{}, partialProbe)
+	if status.Available || status.Detail != "token not available" {
+		t.Fatalf("Expected missing token status, got %+v", status)
+	}
+}
+
+func TestDiscoverNVMLStatusWithHooks(t *testing.T) {
+	disabled := discoverNVMLStatusWithProbe(AppConfig{DisableNVML: true}, integrationProbe{})
+	if disabled.Available || disabled.Detail != integrationDisabled {
+		t.Fatalf("Expected disabled NVML status, got %+v", disabled)
+	}
+
+	driverProbe := integrationProbe{
+		stat: func(path string) (os.FileInfo, error) {
+			if path == nvmlDriverVersionPath {
+				return fakeFileInfo{}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+	}
+	driverStatus := discoverNVMLStatusWithProbe(AppConfig{}, driverProbe)
+	if !driverStatus.Available || !strings.Contains(driverStatus.Detail, "nvidia driver") {
+		t.Fatalf("Expected NVML driver status, got %+v", driverStatus)
+	}
+
+	libraryProbe := integrationProbe{
+		stat: func(path string) (os.FileInfo, error) {
+			if path == nvmlLibraryPath {
+				return fakeFileInfo{}, nil
+			}
+			return nil, os.ErrNotExist
+		},
+	}
+	libraryStatus := discoverNVMLStatusWithProbe(AppConfig{}, libraryProbe)
+	if !libraryStatus.Available || !strings.Contains(libraryStatus.Detail, "NVML library") {
+		t.Fatalf("Expected NVML library status, got %+v", libraryStatus)
+	}
+
+	unavailableProbe := integrationProbe{
+		stat: func(_ string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		},
+	}
+	unavailableStatus := discoverNVMLStatusWithProbe(AppConfig{}, unavailableProbe)
+	if unavailableStatus.Available || unavailableStatus.Detail != integrationUnavailable {
+		t.Fatalf("Expected unavailable NVML status, got %+v", unavailableStatus)
+	}
+}
+
+func TestDiscoverIntegrationsMergesFakeProviders(t *testing.T) {
+	containerID := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	fs := MockFileReader{files: map[string]string{
+		procSelfCgroupPath:      "0::/docker/" + containerID,
+		kubernetesNamespacePath: "default",
+		kubernetesTokenPath:     "token",
+	}}
+	probe := integrationProbe{
+		stat: func(path string) (os.FileInfo, error) {
+			switch path {
+			case dockerSocketPath, nvmlDriverVersionPath:
+				return fakeFileInfo{}, nil
+			default:
+				return nil, os.ErrNotExist
+			}
+		},
+		getenv: func(key string) string {
+			switch key {
+			case kubernetesServiceHostEnv:
+				return "10.0.0.1"
+			case kubernetesPodNameEnv:
+				return "topic-pod"
+			default:
+				return ""
+			}
+		},
+		queryDocker: func(_ string) (ContainerMetadata, error) {
+			return ContainerMetadata{Name: "docker-name", Image: "docker-image"}, nil
+		},
+		queryKubernetes: func(_ FileReader, _ string, _ string, _ string, _ string) (ContainerMetadata, error) {
+			return ContainerMetadata{Pod: "topic-pod", Namespace: "default", Image: "kube-image"}, nil
+		},
+	}
+	metadata, statuses := discoverIntegrationsWithProbe(fs, AppConfig{}, probe)
+	if len(statuses) != integrationStatusCount {
+		t.Fatalf("Expected %d integration statuses, got %+v", integrationStatusCount, statuses)
+	}
+	if metadata.Runtime != integrationKubernetes ||
+		metadata.Name != "docker-name" ||
+		metadata.Pod != "topic-pod" ||
+		metadata.Image != "kube-image" {
+		t.Fatalf("Expected merged integration metadata, got %+v", metadata)
+	}
+}
+
+func TestLiveIntegrationDiscoveryOptIn(t *testing.T) {
+	if os.Getenv("TOPIC_LIVE_INTEGRATION_TESTS") != "1" {
+		t.Skip("set TOPIC_LIVE_INTEGRATION_TESTS=1 to run live Docker/Kubernetes/NVML discovery")
+	}
+	metadata, statuses := discoverIntegrations(OSFileReader{}, AppConfig{})
+	if len(statuses) != integrationStatusCount {
+		t.Fatalf("Expected %d integration statuses, got %+v", integrationStatusCount, statuses)
+	}
+	for _, status := range statuses {
+		if status.Name == "" {
+			t.Fatalf("Expected named integration status, got %+v; metadata=%+v", statuses, metadata)
+		}
 	}
 }
 

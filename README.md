@@ -55,10 +55,31 @@ After installation, simply run the command:
 topic
 ```
 
+Common options:
+
+```bash
+topic --refresh=2s        # change refresh interval
+topic --no-gpu           # disable GPU collection
+topic --no-docker        # disable Docker metadata lookup
+topic --no-kubernetes    # disable Kubernetes metadata lookup
+topic --no-nvml          # disable NVML/NVIDIA integration status
+topic --ascii            # start with the large ASCII logo visible
+topic --once --json      # print one JSON snapshot for scripts
+topic --sort=mem         # initial sort: cpu, mem, gpu, gpumem, pid, user, command
+```
+
 #### Controls
 
 * **Quit:** `q` or `Ctrl+C`
-* **Navigate:** Use the arrow keys (`←`, `↑`, `→`, `↓`) to scroll through the process list, including horizontally for long command names.
+* **Navigate:** Use the arrow keys (`←`, `↑`, `→`, `↓`) or mouse to scroll through the process list.
+* **Filter mode:** `/` to enter, type to filter, `Ctrl+U` to clear, `Esc` to leave.
+* **Sort mode:** `s` to enter, `←`/`→` to choose a column, `↑`/`↓` to choose direction, `Esc` to leave.
+* **Process details:** `Enter`
+* **Signal process:** `k`
+* **Pause refresh:** `p`
+* **Tree view:** `t`
+* **Toggle logo:** `a`
+* **Help:** `?`
 
 ---
 
@@ -77,6 +98,24 @@ make build
 ```
 
 The compiled binary will be available at `./dist/topic`.
+
+### Testing Integrations
+
+The normal test suite uses fake Docker, Kubernetes, and NVML providers so it does not require host services:
+
+```bash
+make test-integrations
+```
+
+This target also runs `scripts/smoke-integration.sh`, which executes `topic --once --json` and validates that Docker, Kubernetes, and NVML integration statuses are present in the JSON snapshot.
+
+Live integration discovery is opt-in:
+
+```bash
+TOPIC_LIVE_INTEGRATION_TESTS=1 make test-integrations
+```
+
+Live tests assert that discovery returns well-formed statuses without hanging or crashing. They do not require every integration to be available; unavailable Docker, Kubernetes, or NVIDIA/NVML environments are valid results.
 
 ---
 

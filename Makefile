@@ -36,6 +36,11 @@ test:
 	@echo "Running tests..."
 	(cd $(MODULE_PATH) && $(GOTEST) -coverprofile=coverage.out ./...)
 
+test-integrations:
+	@echo "Running integration discovery tests..."
+	(cd $(MODULE_PATH) && $(GOTEST) -run 'Test(Discover.*Integration|DiscoverDocker|DiscoverKubernetes|DiscoverNVML|IntegrationParsing|LiveIntegration|WriteJSONSnapshot)' ./...)
+	@./scripts/smoke-integration.sh
+
 bench:
 	@echo "Running benchmarks..."
 	(cd $(MODULE_PATH) && $(GOTEST) -bench=. -benchmem -count=5 ./...)
@@ -73,6 +78,7 @@ help:
 	@echo "  build    Build the application binary"
 	@echo "  run      Run the application"
 	@echo "  test     Run all tests"
+	@echo "  test-integrations Run fake integration tests and JSON smoke validation"
 	@echo "  bench    Run benchmarks"
 	@echo "  bench-save Run benchmarks and save output in tmp/benchmarks"
 	@echo "  lint     Lint the source code"
@@ -81,4 +87,4 @@ help:
 	@echo "  help     Show this help message"
 	@echo ""
 
-.PHONY: all build run clean test bench bench-save deps lint help
+.PHONY: all build run clean test test-integrations bench bench-save deps lint help

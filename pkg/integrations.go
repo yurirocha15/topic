@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -35,40 +34,63 @@ const (
 	kubernetesServicePortEnv = "KUBERNETES_SERVICE_PORT"
 	kubernetesPodNameEnv     = "HOSTNAME"
 	kubernetesNodeNameEnv    = "NODE_NAME"
+	nvmlDriverVersionPath    = "/proc/driver/nvidia/version"
+	nvmlLibraryPath          = "/usr/lib/libnvidia-ml.so"
 )
 
+type integrationProbe struct {
+	stat            func(string) (os.FileInfo, error)
+	getenv          func(string) string
+	queryDocker     func(string) (ContainerMetadata, error)
+	queryKubernetes func(FileReader, string, string, string, string) (ContainerMetadata, error)
+}
+
 func discoverIntegrations(fs FileReader, config AppConfig) (ContainerMetadata, []IntegrationStatus) {
+	return discoverIntegrationsWithProbe(fs, config, defaultIntegrationProbe())
+}
+
+func discoverIntegrationsWithProbe(
+	fs FileReader,
+	config AppConfig,
+	probe integrationProbe,
+) (ContainerMetadata, []IntegrationStatus) {
+	probe = probe.withDefaults()
 	metadata := ContainerMetadata{}
 	statuses := make([]IntegrationStatus, 0, integrationStatusCount)
 
-	dockerMetadata, dockerStatus := discoverDockerMetadata(fs, config)
+	dockerMetadata, dockerStatus := discoverDockerMetadataWithProbe(fs, config, probe)
 	statuses = append(statuses, dockerStatus)
 	if dockerStatus.Available {
 		metadata = mergeMetadata(metadata, dockerMetadata)
 	}
 
-	kubernetesMetadata, kubernetesStatus := discoverKubernetesMetadata(fs, config)
+	kubernetesMetadata, kubernetesStatus := discoverKubernetesMetadataWithProbe(fs, config, probe)
 	statuses = append(statuses, kubernetesStatus)
 	if kubernetesStatus.Available {
 		metadata = mergeMetadata(metadata, kubernetesMetadata)
 	}
 
-	statuses = append(statuses, discoverNVMLStatus(config))
+	statuses = append(statuses, discoverNVMLStatusWithProbe(config, probe))
 	return metadata, statuses
 }
 
-func discoverDockerMetadata(fs FileReader, config AppConfig) (ContainerMetadata, IntegrationStatus) {
+func discoverDockerMetadataWithProbe(
+	fs FileReader,
+	config AppConfig,
+	probe integrationProbe,
+) (ContainerMetadata, IntegrationStatus) {
+	probe = probe.withDefaults()
 	if config.DisableDocker {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationDocker, Detail: integrationDisabled}
 	}
-	if _, err := os.Stat(dockerSocketPath); err != nil {
+	if _, err := probe.stat(dockerSocketPath); err != nil {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationDocker, Detail: integrationUnavailable}
 	}
 	containerID := containerIDFromCgroup(fs)
 	if containerID == "" {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationDocker, Detail: "container id not found"}
 	}
-	metadata, err := queryDockerContainer(containerID)
+	metadata, err := probe.queryDocker(containerID)
 	if err != nil {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationDocker, Detail: err.Error()}
 	}
@@ -150,12 +172,17 @@ func queryDockerContainer(containerID string) (ContainerMetadata, error) {
 	}, nil
 }
 
-func discoverKubernetesMetadata(fs FileReader, config AppConfig) (ContainerMetadata, IntegrationStatus) {
+func discoverKubernetesMetadataWithProbe(
+	fs FileReader,
+	config AppConfig,
+	probe integrationProbe,
+) (ContainerMetadata, IntegrationStatus) {
+	probe = probe.withDefaults()
 	if config.DisableKubernetes {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationKubernetes, Detail: integrationDisabled}
 	}
-	host := os.Getenv(kubernetesServiceHostEnv)
-	pod := os.Getenv(kubernetesPodNameEnv)
+	host := probe.getenv(kubernetesServiceHostEnv)
+	pod := probe.getenv(kubernetesPodNameEnv)
 	if host == "" || pod == "" {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationKubernetes, Detail: integrationUnavailable}
 	}
@@ -172,10 +199,10 @@ func discoverKubernetesMetadata(fs FileReader, config AppConfig) (ContainerMetad
 		Runtime:   integrationKubernetes,
 		Namespace: namespace,
 		Pod:       pod,
-		Node:      os.Getenv(kubernetesNodeNameEnv),
+		Node:      probe.getenv(kubernetesNodeNameEnv),
 	}
 	token := strings.TrimSpace(string(tokenBytes))
-	if podMetadata, queryErr := queryKubernetesPod(fs, host, namespace, pod, token); queryErr == nil {
+	if podMetadata, queryErr := probe.queryKubernetes(fs, host, namespace, pod, token); queryErr == nil {
 		metadata = mergeMetadata(metadata, podMetadata)
 	}
 	return metadata, IntegrationStatus{Name: integrationKubernetes, Available: true, Detail: integrationAvailable}
@@ -256,18 +283,19 @@ func parseKubernetesPod(reader io.Reader) (ContainerMetadata, error) {
 	}, nil
 }
 
-func discoverNVMLStatus(config AppConfig) IntegrationStatus {
+func discoverNVMLStatusWithProbe(config AppConfig, probe integrationProbe) IntegrationStatus {
+	probe = probe.withDefaults()
 	if config.DisableNVML {
 		return IntegrationStatus{Name: integrationNVML, Detail: integrationDisabled}
 	}
-	if _, err := os.Stat("/proc/driver/nvidia/version"); err == nil {
+	if _, err := probe.stat(nvmlDriverVersionPath); err == nil {
 		return IntegrationStatus{
 			Name:      integrationNVML,
 			Available: true,
 			Detail:    "nvidia driver visible; nvidia-smi fallback enabled",
 		}
 	}
-	if _, err := os.Stat(filepath.Join("/usr/lib", "libnvidia-ml.so")); err == nil {
+	if _, err := probe.stat(nvmlLibraryPath); err == nil {
 		return IntegrationStatus{
 			Name:      integrationNVML,
 			Available: true,
@@ -275,6 +303,32 @@ func discoverNVMLStatus(config AppConfig) IntegrationStatus {
 		}
 	}
 	return IntegrationStatus{Name: integrationNVML, Detail: integrationUnavailable}
+}
+
+func defaultIntegrationProbe() integrationProbe {
+	return integrationProbe{
+		stat:            os.Stat,
+		getenv:          os.Getenv,
+		queryDocker:     queryDockerContainer,
+		queryKubernetes: queryKubernetesPod,
+	}
+}
+
+func (probe integrationProbe) withDefaults() integrationProbe {
+	defaults := defaultIntegrationProbe()
+	if probe.stat == nil {
+		probe.stat = defaults.stat
+	}
+	if probe.getenv == nil {
+		probe.getenv = defaults.getenv
+	}
+	if probe.queryDocker == nil {
+		probe.queryDocker = defaults.queryDocker
+	}
+	if probe.queryKubernetes == nil {
+		probe.queryKubernetes = defaults.queryKubernetes
+	}
+	return probe
 }
 
 func mergeMetadata(base ContainerMetadata, next ContainerMetadata) ContainerMetadata {
