@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rivo/tview"
 )
 
 // --- Mock FileReader for Testing ---
@@ -82,6 +84,8 @@ func TestMakeBar(t *testing.T) {
 		{name: "75 Percent (width 10)", percent: 75, width: 10, expected: "[green]▓▓▓▓▓▓▓░░░[white]"},
 		{name: "Zero width", percent: 100, width: 0, expected: "[green][white]"},
 		{name: "Negative width", percent: 100, width: -5, expected: "[green][white]"},
+		{name: "Over 100 percent is capped", percent: 125, width: 10, expected: "[green]▓▓▓▓▓▓▓▓▓▓[white]"},
+		{name: "Negative percent is empty", percent: -20, width: 10, expected: "[green]░░░░░░░░░░[white]"},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,6 +115,222 @@ func TestMakeBarDynamicWidth(t *testing.T) {
 				t.Errorf("Bar width is incorrect. Got %d, want %d", actualWidth, width)
 			}
 		})
+	}
+}
+
+func TestCalculateLabelInfo(t *testing.T) {
+	state := &State{
+		static: StaticInfo{
+			ContainerCPULimit:      2,
+			ContainerMemLimitBytes: 4 * bytesPerGB,
+			ContainerMemLimitGB:    4,
+			HostCores:              8,
+			HostMemTotalGB:         16,
+		},
+		dynamic: DynamicInfo{
+			ContainerCPUUsage:  75,
+			ContainerMemUsedGB: 2,
+			HostCPUUsage:       25,
+			HostMemUsedGB:      8,
+		},
+	}
+
+	cpuLabel, cpuInfo, cpuUsage := calculateCPULabelInfo(state)
+	if !strings.Contains(cpuLabel, "75.0") || !strings.Contains(cpuInfo, "limit: 2.00 CPUs") || cpuUsage != 75 {
+		t.Fatalf("Unexpected limited CPU label/info: %q %q %.1f", cpuLabel, cpuInfo, cpuUsage)
+	}
+
+	memLabel, memInfo, memPercent := calculateMEMLabelInfo(state)
+	if !strings.Contains(memLabel, "50.0") || !strings.Contains(memInfo, "2.000 GB / 4.000 GB") || memPercent != 50 {
+		t.Fatalf("Unexpected limited MEM label/info: %q %q %.1f", memLabel, memInfo, memPercent)
+	}
+
+	state.static.ContainerCPULimit = float64(state.static.HostCores)
+	state.static.ContainerMemLimitBytes = 0
+	state.static.ContainerMemLimitGB = 0
+	cpuLabel, cpuInfo, cpuUsage = calculateCPULabelInfo(state)
+	if !strings.Contains(cpuLabel, "25.0") || !strings.Contains(cpuInfo, "no cgroup limit") || cpuUsage != 25 {
+		t.Fatalf("Unexpected host CPU label/info: %q %q %.1f", cpuLabel, cpuInfo, cpuUsage)
+	}
+
+	memLabel, memInfo, memPercent = calculateMEMLabelInfo(state)
+	if !strings.Contains(memLabel, "50.0") || !strings.Contains(memInfo, "no cgroup limit") || memPercent != 50 {
+		t.Fatalf("Unexpected host MEM label/info: %q %q %.1f", memLabel, memInfo, memPercent)
+	}
+}
+
+func TestCalculateBarWidth(t *testing.T) {
+	labels := []string{"CPU: [yellow]50.0%[white] ", "MEM: [yellow]10.0%[white] "}
+	infos := []string{" [darkcyan](limit: 2.00 CPUs)[white]", " [darkcyan]1 GB / 4 GB[white]"}
+
+	width := calculateBarWidth(120, labels, infos)
+	if width <= minBarWidth {
+		t.Fatalf("Expected wide terminal to allow a larger bar, got %d", width)
+	}
+
+	width = calculateBarWidth(1, labels, infos)
+	if width != minBarWidth {
+		t.Fatalf("Expected narrow terminal to use min bar width %d, got %d", minBarWidth, width)
+	}
+}
+
+func TestStorageAndGPULabelInfo(t *testing.T) {
+	state := &State{
+		static: StaticInfo{
+			GPUTotalGB: []float64{8},
+		},
+		dynamic: DynamicInfo{
+			StorageUsage: []StorageUsage{
+				{Path: "/", UsedGB: 10, FreeGB: 90, UsedPercent: 10},
+				{Path: "/very/long/path/for/storage", UsedGB: 75, FreeGB: 25, UsedPercent: 75},
+			},
+			LiveGPUUsage: []GPUUsage{
+				{Index: 0, Utilization: 80, MemUsedGB: 4},
+				{Index: 1, Utilization: 30, MemUsedGB: 2},
+			},
+		},
+	}
+
+	labels, infos, percentages := calculateStorageLabelsInfo(state)
+	if len(labels) != 2 || len(infos) != 2 || len(percentages) != 2 {
+		t.Fatalf("Unexpected storage label slice sizes: %d %d %d", len(labels), len(infos), len(percentages))
+	}
+	if !strings.Contains(labels[0], "DISK /:") || !strings.Contains(infos[0], "10.00 GB / 100.00 GB") {
+		t.Fatalf("Unexpected root storage label/info: %q %q", labels[0], infos[0])
+	}
+	if !strings.Contains(labels[1], ".../for/storage") {
+		t.Fatalf("Expected long storage path to be truncated, got %q", labels[1])
+	}
+	if percentages[0] != 10 || percentages[1] != 75 {
+		t.Fatalf("Unexpected storage percentages: %v", percentages)
+	}
+
+	labels, infos, percentages = calculateGPULabelsInfo(state)
+	if len(labels) != 4 || len(infos) != 4 || len(percentages) != 4 {
+		t.Fatalf("Unexpected GPU label slice sizes: %d %d %d", len(labels), len(infos), len(percentages))
+	}
+	if !strings.Contains(labels[0], "GPU0 Util:") || percentages[0] != 80 {
+		t.Fatalf("Unexpected GPU util label/percent: %q %.1f", labels[0], percentages[0])
+	}
+	if !strings.Contains(labels[1], "GPU0 Mem:") ||
+		!strings.Contains(infos[1], "4.00 GB / 8.00 GB") ||
+		percentages[1] != 50 {
+		t.Fatalf("Unexpected GPU memory label/info/percent: %q %q %.1f", labels[1], infos[1], percentages[1])
+	}
+	if percentages[3] != 0 {
+		t.Fatalf("Expected missing GPU total to produce 0 memory percent, got %.1f", percentages[3])
+	}
+}
+
+func TestBuildSectionsAndAlignedRows(t *testing.T) {
+	labels := []string{
+		"DISK /:        [yellow] 10.0%[white]",
+		"DISK /data:    [yellow] 50.0%[white]",
+		"DISK /logs:    [yellow] 90.0%[white]",
+	}
+	infos := []string{
+		"[darkcyan]10.00 GB / 100.00 GB[white]",
+		"[darkcyan]50.00 GB / 100.00 GB[white]",
+		"[darkcyan]90.00 GB / 100.00 GB[white]",
+	}
+	percentages := []float64{10, 50, 90}
+	maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromSlices(labels, infos)
+	layout := BarLayout{
+		Columns:       2,
+		BarWidth:      8,
+		TotalWidth:    113,
+		MaxLabelWidth: maxLabelWidth,
+		MaxInfoWidth:  maxInfoWidth,
+	}
+
+	storageSection := buildStorageSection(layout, labels, infos, percentages)
+	if !strings.Contains(storageSection, "DISK /:") || !strings.Contains(storageSection, "DISK /logs:") {
+		t.Fatalf("Storage section is missing expected labels: %q", storageSection)
+	}
+
+	emptySection := buildStorageSection(layout, nil, nil, nil)
+	if emptySection != "\n" {
+		t.Fatalf("Expected empty storage section to be a separator newline, got %q", emptySection)
+	}
+
+	gpuSection := buildGPUSection(layout, labels[:2], infos[:2], percentages[:2])
+	if !strings.Contains(gpuSection, "DISK /:") || !strings.Contains(gpuSection, "DISK /data:") {
+		t.Fatalf("GPU section builder did not render provided bars: %q", gpuSection)
+	}
+
+	rows := makeAlignedMultiColumnBars([]BarData{
+		{Label: labels[0], Percent: percentages[0], Info: infos[0]},
+		{Label: labels[1], Percent: percentages[1], Info: infos[1]},
+		{Label: labels[2], Percent: percentages[2], Info: infos[2]},
+	}, layout)
+	if len(rows) != 2 {
+		t.Fatalf("Expected two aligned rows, got %d", len(rows))
+	}
+	if gotWidth := tview.TaggedStringWidth(rows[0]); gotWidth != layout.TotalWidth {
+		t.Fatalf("Expected first row visible width %d, got %d: %q", layout.TotalWidth, gotWidth, rows[0])
+	}
+
+	emptyRows := makeAlignedMultiColumnBars(nil, layout)
+	if emptyRows != nil {
+		t.Fatalf("Expected nil rows for empty bars, got %v", emptyRows)
+	}
+}
+
+func TestBuildCPUAndMemorySections(t *testing.T) {
+	cpu := buildCPUSection(5, "CPU: ", " info", 40)
+	if cpu != "CPU: [green]▓▓░░░[white] info\n" {
+		t.Fatalf("Unexpected CPU section: %q", cpu)
+	}
+	mem := buildMemorySection(5, "MEM: ", " info", 60)
+	if mem != "MEM: [green]▓▓▓░░[white] info\n" {
+		t.Fatalf("Unexpected memory section: %q", mem)
+	}
+}
+
+func TestUpdateInfoView(t *testing.T) {
+	view := tview.NewTextView()
+	height := updateInfoView(view)
+	text := view.GetText(false)
+	if height <= 0 {
+		t.Fatalf("Expected positive info view height, got %d", height)
+	}
+	if !strings.Contains(text, "top inside a container") || !strings.Contains(text, "Quit: q") {
+		t.Fatalf("Info view text missing expected content: %q", text)
+	}
+}
+
+func TestUpdateProcessTable(t *testing.T) {
+	table := tview.NewTable()
+	state := &State{
+		dynamic: DynamicInfo{
+			Processes: []ProcessInfo{
+				{PID: 123, User: "alice", CPUPercent: 12.5, MemPercent: 30, Command: "topic", GPUIndex: -1},
+				{
+					PID:           456,
+					User:          "bob",
+					CPUPercent:    1.5,
+					MemPercent:    2.5,
+					Command:       "python",
+					GPUIndex:      0,
+					GPUUtil:       70,
+					GPUMemPercent: 40,
+				},
+			},
+		},
+	}
+
+	updateProcessTable(table, state)
+	if got := table.GetCell(0, 0).Text; got != "PID" {
+		t.Fatalf("Expected PID header, got %q", got)
+	}
+	if got := table.GetCell(1, 0).Text; got != "123" {
+		t.Fatalf("Expected first PID 123, got %q", got)
+	}
+	if got := table.GetCell(1, 4).Text; got != "-" {
+		t.Fatalf("Expected no-GPU marker, got %q", got)
+	}
+	if got := table.GetCell(2, 4).Text; got != "70" {
+		t.Fatalf("Expected GPU util 70, got %q", got)
 	}
 }
 

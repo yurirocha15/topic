@@ -65,7 +65,7 @@ topic
 ### Building from Source
 
 If you prefer to build the project yourself, you will need:
-* Go (version 1.21 or later)
+* Go (version 1.23 or later)
 * `make`
 
 Clone the repository and run the build command:
