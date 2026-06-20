@@ -18,7 +18,12 @@ func handleInput(
 	processTable *tview.Table,
 	signaler ProcessSignaler,
 ) *tcell.EventKey {
-	if closeModalInput(event, pages) {
+	if handled, nextEvent := handleModalInput(event, pages, app); handled {
+		return nextEvent
+	}
+
+	if event.Key() == tcell.KeyCtrlC {
+		app.Stop()
 		return nil
 	}
 
@@ -27,15 +32,12 @@ func handleInput(
 	sortMode := state.ui.SortMode
 	state.dynamic.mu.Unlock()
 
-	if searchMode {
-		return handleSearchInput(event, state)
-	}
-	if sortMode {
-		return handleSortInput(event, state)
+	if handled, nextEvent := handleActiveModeInput(event, state, app, searchMode, sortMode); handled {
+		return nextEvent
 	}
 
 	switch {
-	case event.Rune() == 'q' || event.Key() == tcell.KeyCtrlC:
+	case event.Rune() == 'q':
 		app.Stop()
 		return nil
 	case event.Rune() == '/':
@@ -90,22 +92,52 @@ func handleInput(
 	}
 }
 
-func closeModalInput(event *tcell.EventKey, pages *tview.Pages) bool {
+func handleActiveModeInput(
+	event *tcell.EventKey,
+	state *State,
+	app *tview.Application,
+	searchMode bool,
+	sortMode bool,
+) (bool, *tcell.EventKey) {
+	if searchMode {
+		handleSearchInput(event, state)
+		return true, nil
+	}
+	if sortMode {
+		if event.Rune() == 'q' {
+			app.Stop()
+			return true, nil
+		}
+		handleSortInput(event, state)
+		return true, nil
+	}
+	return false, event
+}
+
+func handleModalInput(
+	event *tcell.EventKey,
+	pages *tview.Pages,
+	app *tview.Application,
+) (bool, *tcell.EventKey) {
 	if pages == nil {
-		return false
+		return false, event
 	}
 	name, _ := pages.GetFrontPage()
 	if name == "" || name == "main" {
-		return false
+		return false, event
+	}
+	if event.Key() == tcell.KeyCtrlC {
+		app.Stop()
+		return true, nil
 	}
 	if event.Key() == tcell.KeyEsc || event.Rune() == 'q' {
 		pages.RemovePage(name)
-		return true
+		return true, nil
 	}
-	return false
+	return true, event
 }
 
-func handleSearchInput(event *tcell.EventKey, state *State) *tcell.EventKey {
+func handleSearchInput(event *tcell.EventKey, state *State) {
 	//nolint:exhaustive // Search mode handles text input through the default branch.
 	switch event.Key() {
 	case tcell.KeyEsc:
@@ -135,10 +167,9 @@ func handleSearchInput(event *tcell.EventKey, state *State) *tcell.EventKey {
 			})
 		}
 	}
-	return nil
 }
 
-func handleSortInput(event *tcell.EventKey, state *State) *tcell.EventKey {
+func handleSortInput(event *tcell.EventKey, state *State) {
 	//nolint:exhaustive // Sort mode only handles navigation/confirmation keys.
 	switch event.Key() {
 	case tcell.KeyEsc, tcell.KeyEnter:
@@ -162,9 +193,8 @@ func handleSortInput(event *tcell.EventKey, state *State) *tcell.EventKey {
 			ui.ReverseSort = false
 		})
 	default:
-		return nil
+		return
 	}
-	return nil
 }
 
 func updateUIState(state *State, update func(*UIState)) {

@@ -279,6 +279,9 @@ func updateMetricsHistory(history *MetricsHistory, staticInfo StaticInfo, dynami
 func (ring *HistoryRing) Add(value float64) {
 	if len(ring.Values) == 0 {
 		ring.Values = make([]float64, historySize)
+		for index := range ring.Values {
+			ring.Values[index] = value
+		}
 	}
 	ring.Values[ring.Next] = value
 	ring.Next = (ring.Next + 1) % len(ring.Values)
@@ -293,7 +296,7 @@ func (ring *HistoryRing) Ordered() []float64 {
 	}
 	if !ring.Filled {
 		ordered := make([]float64, len(ring.Values))
-		copy(ordered[len(ordered)-ring.Next:], ring.Values[:ring.Next])
+		copy(ordered, ring.Values)
 		return ordered
 	}
 	ordered := make([]float64, 0, len(ring.Values))

@@ -691,17 +691,91 @@ func TestSortModeFollowsTableColumnOrder(t *testing.T) {
 	}
 }
 
-func TestCloseModalInput(t *testing.T) {
+func TestModalInputRouting(t *testing.T) {
+	app := tview.NewApplication()
 	pages := tview.NewPages().AddPage("main", tview.NewBox(), true, true)
 	showMessage(pages, "hello")
-	if !closeModalInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), pages) {
+
+	handled, nextEvent := handleModalInput(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), pages, app)
+	if !handled || nextEvent == nil || nextEvent.Key() != tcell.KeyEnter {
+		t.Fatalf("Expected Enter to pass through to the modal, handled=%v next=%v", handled, nextEvent)
+	}
+	if !pages.HasPage("message") {
+		t.Fatal("Expected Enter pass-through to leave modal open for tview to handle")
+	}
+
+	handled, nextEvent = handleModalInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), pages, app)
+	if !handled || nextEvent != nil {
 		t.Fatal("Expected Esc to close front modal")
 	}
 	if pages.HasPage("message") {
 		t.Fatal("Expected message modal to be removed")
 	}
-	if closeModalInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), pages) {
+	handled, nextEvent = handleModalInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), pages, app)
+	if handled || nextEvent == nil {
 		t.Fatal("Did not expect Esc to close main page")
+	}
+}
+
+func TestHandleInputDoesNotReopenProcessDetailsWhenModalIsOpen(t *testing.T) {
+	state := &State{
+		dynamic: DynamicInfo{
+			Processes: []ProcessInfo{{PID: 123, User: "root", Command: "sleep"}},
+		},
+	}
+	app := tview.NewApplication()
+	pages := tview.NewPages().AddPage("main", tview.NewBox(), true, true)
+	table := tview.NewTable().SetSelectable(true, false)
+	updateProcessTable(table, state)
+	table.Select(1, 0)
+	signaler := &MockProcessSignaler{}
+
+	handleInput(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), state, app, pages, table, signaler)
+	if !pages.HasPage("process-details") {
+		t.Fatal("Expected first Enter to open process details")
+	}
+
+	nextEvent := handleInput(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), state, app, pages, table, signaler)
+	if nextEvent == nil || nextEvent.Key() != tcell.KeyEnter {
+		t.Fatalf("Expected second Enter to pass through to the modal, got %v", nextEvent)
+	}
+	if !pages.HasPage("process-details") {
+		t.Fatal("Expected pass-through Enter to leave details modal available to tview")
+	}
+}
+
+func TestSortModeInputRouting(t *testing.T) {
+	state := &State{ui: UIState{ProcessSort: SortByUser, SortMode: true}}
+	app := tview.NewApplication()
+	pages := tview.NewPages()
+	table := tview.NewTable()
+	signaler := &MockProcessSignaler{}
+
+	got := handleInput(tcell.NewEventKey(tcell.KeyRight, 0, tcell.ModNone), state, app, pages, table, signaler)
+	if got != nil {
+		t.Fatalf("Expected sort-mode Right key to be consumed, got %v", got)
+	}
+	if state.ui.ProcessSort != SortByCPU {
+		t.Fatalf("Expected sort mode to follow table order from USER to CPU, got %v", state.ui.ProcessSort)
+	}
+
+	handleInput(tcell.NewEventKey(tcell.KeyLeft, 0, tcell.ModNone), state, app, pages, table, signaler)
+	if state.ui.ProcessSort != SortByUser {
+		t.Fatalf("Expected sort mode to move back from CPU to USER, got %v", state.ui.ProcessSort)
+	}
+
+	handleInput(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone), state, app, pages, table, signaler)
+	if state.ui.ReverseSort {
+		t.Fatal("Expected Down to select ascending sort direction")
+	}
+	handleInput(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone), state, app, pages, table, signaler)
+	if !state.ui.ReverseSort {
+		t.Fatal("Expected Up to select descending sort direction")
+	}
+
+	handleInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), state, app, pages, table, signaler)
+	if state.ui.SortMode {
+		t.Fatal("Expected Esc to leave sort mode")
 	}
 }
 
@@ -1720,10 +1794,15 @@ func TestSparklineFixedWidthAndTrim(t *testing.T) {
 	ring.Add(25)
 	if got := sparkline(ring); len([]rune(got)) != historySize {
 		t.Fatalf("Expected fixed history width %d, got %q", historySize, got)
+	} else if strings.Contains(got, "▁") {
+		t.Fatalf("Expected first history sample to seed the ring without leading zero ramp, got %q", got)
 	}
-	trimmed := sparklineForWidth(ring, 12, len("HIST CPU "))
+	trimmed := sparklineForWidth(ring, len("HIST CPU ")+minSparklineWidth, len("HIST CPU "))
 	if len([]rune(trimmed)) != minSparklineWidth {
 		t.Fatalf("Expected minimum sparkline width %d, got %q", minSparklineWidth, trimmed)
+	}
+	if got := sparklineForWidth(ring, 12, len("HIST CPU ")); got != "" {
+		t.Fatalf("Expected sparkline to be omitted when width is too narrow, got %q", got)
 	}
 }
 

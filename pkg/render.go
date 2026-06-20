@@ -420,10 +420,16 @@ func writeHistoryLine(builder *strings.Builder, label string, ring HistoryRing, 
 
 func sparklineForWidth(ring HistoryRing, availableWidth int, prefixWidth int) string {
 	width := availableWidth - prefixWidth
+	if width <= 0 {
+		return ""
+	}
 	if width > historySize {
 		width = historySize
 	}
 	if width < minSparklineWidth {
+		if availableWidth < prefixWidth+minSparklineWidth {
+			return ""
+		}
 		width = minSparklineWidth
 	}
 	return trimSparkline(sparkline(ring), width)
