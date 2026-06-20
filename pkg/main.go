@@ -66,6 +66,15 @@ const (
 	fsTypeProc                = "proc"
 	mountProcPath             = "/proc"
 	mountTmpPath              = "/tmp"
+	nvidiaSMICommand          = "nvidia-smi"
+	nvidiaSMIMemoryTotalQuery = "--query-gpu=memory.total"
+	nvidiaSMIUsageQuery       = "--query-gpu=utilization.gpu,memory.used"
+	nvidiaSMICSVFormat        = "--format=csv,noheader,nounits"
+	nvidiaSMIPMonCommand      = "pmon"
+	nvidiaSMIPMonCountFlag    = "-c"
+	nvidiaSMIPMonSampleCount  = "1"
+	nvidiaSMIPMonSelectFlag   = "-s"
+	nvidiaSMIPMonUsageMemory  = "um"
 )
 
 // --- Interfaces ---
@@ -1428,7 +1437,7 @@ func updateStorageUsageWithProvider(storageMounts []StorageMount, provider Stora
 
 // getStaticGPUInfo fetches total memory for each GPU.
 func getStaticGPUInfo(runner CommandRunner) (int, []float64) {
-	outMem, err := runner.Output("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
+	outMem, err := runner.Output(nvidiaSMICommand, nvidiaSMIMemoryTotalQuery, nvidiaSMICSVFormat)
 	if err != nil {
 		return 0, nil
 	}
@@ -1452,7 +1461,7 @@ func updateLiveGPUUsage(gpuCount int, runner CommandRunner) []GPUUsage {
 	if gpuCount == 0 {
 		return nil
 	}
-	out, err := runner.Output("nvidia-smi", "--query-gpu=utilization.gpu,memory.used", "--format=csv,noheader,nounits")
+	out, err := runner.Output(nvidiaSMICommand, nvidiaSMIUsageQuery, nvidiaSMICSVFormat)
 	if err != nil {
 		return nil
 	}
@@ -1479,7 +1488,14 @@ func updateLiveGPUUsage(gpuCount int, runner CommandRunner) []GPUUsage {
 // getGPUProcessMap queries nvidia-smi pmon for apps running on the GPU and maps their PID to usage.
 func getGPUProcessMap(runner CommandRunner) map[int32]GPUProcessInfo {
 	// Use `pmon` with `-c 1` to get a single snapshot, and `-s um` for utilization and memory.
-	out, err := runner.Output("nvidia-smi", "pmon", "-c", "1", "-s", "um")
+	out, err := runner.Output(
+		nvidiaSMICommand,
+		nvidiaSMIPMonCommand,
+		nvidiaSMIPMonCountFlag,
+		nvidiaSMIPMonSampleCount,
+		nvidiaSMIPMonSelectFlag,
+		nvidiaSMIPMonUsageMemory,
+	)
 	if err != nil {
 		return nil
 	}

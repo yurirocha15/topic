@@ -868,6 +868,19 @@ func TestGetGPUProcessMapSkipsMalformedRows(t *testing.T) {
 	}
 }
 
+func TestGetGPUProcessMapEmptyOutput(t *testing.T) {
+	mockRunner := MockCommandRunner{
+		outputs: map[string]string{
+			"nvidia-smi pmon -c 1 -s um": "",
+		},
+	}
+
+	processMap := getGPUProcessMap(mockRunner)
+	if len(processMap) != 0 {
+		t.Fatalf("Expected empty GPU process map, got %+v", processMap)
+	}
+}
+
 // TestGetStaticGPUInfo tests the parsing of nvidia-smi for static GPU info.
 func TestGetStaticGPUInfo(t *testing.T) {
 	mockRunner := MockCommandRunner{
@@ -905,6 +918,19 @@ func TestGetStaticGPUInfoSkipsMalformedRows(t *testing.T) {
 	}
 }
 
+func TestGetStaticGPUInfoEmptyOutput(t *testing.T) {
+	mockRunner := MockCommandRunner{
+		outputs: map[string]string{
+			"nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits": "\n",
+		},
+	}
+
+	count, totals := getStaticGPUInfo(mockRunner)
+	if count != 0 || totals != nil {
+		t.Fatalf("Expected no GPUs for empty output, got count=%d totals=%v", count, totals)
+	}
+}
+
 // TestUpdateLiveGPUUsage tests the parsing of nvidia-smi for live GPU usage.
 func TestUpdateLiveGPUUsage(t *testing.T) {
 	mockRunner := MockCommandRunner{
@@ -939,6 +965,19 @@ func TestUpdateLiveGPUUsageSkipsMalformedRows(t *testing.T) {
 	}
 	if usage[0].Index != 2 || usage[0].Utilization != 80 || usage[0].MemUsedGB != 1.0 {
 		t.Fatalf("Unexpected parsed GPU usage: %+v", usage[0])
+	}
+}
+
+func TestUpdateLiveGPUUsageEmptyOutput(t *testing.T) {
+	mockRunner := MockCommandRunner{
+		outputs: map[string]string{
+			"nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits": "\n",
+		},
+	}
+
+	usage := updateLiveGPUUsage(2, mockRunner)
+	if len(usage) != 0 {
+		t.Fatalf("Expected empty live GPU usage, got %+v", usage)
 	}
 }
 
