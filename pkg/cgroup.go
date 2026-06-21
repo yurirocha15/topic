@@ -74,11 +74,17 @@ func getContainerMemLimit(cgroupVersion CgroupVersion, fs FileReader) (int64, fl
 		path = cgroupV1MemoryLimitPath
 	}
 	limitStr, err := readStringFromFile(path, fs)
-	if err != nil || limitStr == cgroupMaxToken {
+	if err != nil {
+		return 0, 0
+	}
+	if limitStr == cgroupMaxToken {
 		return 0, 0
 	}
 	limitBytes, err := strconv.ParseInt(limitStr, 10, 64)
-	if err != nil || limitBytes <= 0 {
+	if err != nil {
+		return 0, 0
+	}
+	if limitBytes <= 0 {
 		return 0, 0
 	}
 	return limitBytes, float64(limitBytes) / float64(bytesPerGB)

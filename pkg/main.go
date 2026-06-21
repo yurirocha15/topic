@@ -24,7 +24,7 @@ const (
 	minGPUUsageCount          = 2                 // For nvidia-smi GPU usage
 	minGPUInfoCount           = 5                 // For nvidia-smi pmon
 	barsPerGPU                = 2                 // GPU utilization and memory bars
-	dynamicCollectorCount     = 12                // Number of dynamic collectors in updateAll
+	dynamicCollectorCount     = 12                // Number of dynamic collectors in refreshDynamicState
 	percentMultiplier         = 100.0             // Multiplier for percentage calculations
 	bytesPerKB                = 1024              // Bytes per kilobyte
 	bytesPerMB                = bytesPerKB * 1024 // Bytes per megabyte
@@ -105,7 +105,7 @@ func main() {
 	}
 
 	if config.Once {
-		updateAll(state, fileReader, cmdRunner)
+		refreshDynamicState(state, fileReader, cmdRunner)
 		if config.JSONOutput {
 			if err = writeJSONSnapshot(os.Stdout, state); err != nil {
 				log.Fatalf("Could not write JSON snapshot: %v", err)
@@ -168,7 +168,7 @@ func main() {
 		for {
 			<-ticker.C
 			if !isPaused(state) {
-				updateAll(state, fileReader, cmdRunner)
+				refreshDynamicState(state, fileReader, cmdRunner)
 			}
 			app.QueueUpdateDraw(render)
 		}
@@ -177,7 +177,7 @@ func main() {
 	setAppInputCapture(app, state, pages, processTable, OSProcessSignaler{}, render)
 
 	// Initial data load and draw
-	updateAll(state, fileReader, cmdRunner)
+	refreshDynamicState(state, fileReader, cmdRunner)
 	render()
 
 	if err = app.SetRoot(pages, true).Run(); err != nil {

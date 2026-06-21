@@ -24,9 +24,8 @@ func updateHostMemUsageWithProvider(provider HostMetricsProvider) float64 {
 
 // --- Data Fetching Functions ---
 
-// updateAll fetches all dynamic data and updates the state.
-func updateAll(state *State, fs FileReader, runner CommandRunner) {
-	updateAllWithProviders(
+func refreshDynamicState(state *State, fs FileReader, runner CommandRunner) {
+	refreshDynamicStateWithProviders(
 		state,
 		fs,
 		runner,
@@ -38,7 +37,7 @@ func updateAll(state *State, fs FileReader, runner CommandRunner) {
 	)
 }
 
-func updateAllWithProviders(
+func refreshDynamicStateWithProviders(
 	state *State,
 	fs FileReader,
 	runner CommandRunner,
@@ -152,6 +151,7 @@ func usesContainerMemory(staticInfo StaticInfo) bool {
 	return staticInfo.ContainerMemLimitBytes > 0
 }
 
+// collectDynamicInfo runs all collectors concurrently and returns the snapshot.
 func collectDynamicInfo(collectors DynamicCollectorSet) DynamicSnapshot {
 	dynamic, _ := collectDynamicInfoWithTiming(collectors, nil)
 	return dynamic
@@ -271,7 +271,6 @@ func dynamicCollectorEntries(collectors DynamicCollectorSet, dynamic *DynamicSna
 	return collectorEntries
 }
 
-// getStaticInfo fetches static information about the container and host.
 func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticInfo, error) {
 	return getStaticInfoWithProviders(fs, runner, stater, OSHostMetricsProvider{}, OSStorageProvider{})
 }
@@ -302,7 +301,9 @@ func getStaticInfoWithProviders(
 	} else {
 		info.HostMemTotalGB = 0
 	}
-	info.GPUCount, info.GPUTotalGB = getStaticGPUInfo(runner)
-	info.StorageMounts = getStaticStorageInfoWithProvider(storageProvider)
-	return info, err
+	info.GPUCount, info.GPUTotalGB, err = getStaticGPUInfo(runner)
+	_ = err
+	info.StorageMounts, err = getStaticStorageInfoWithProvider(storageProvider)
+	_ = err
+	return info, nil
 }

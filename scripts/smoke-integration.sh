@@ -2,13 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="${TOPIC_BINARY:-$ROOT_DIR/dist/topic}"
 
-if [[ ! -x "$BIN" ]]; then
-  make -C "$ROOT_DIR" build >/dev/null
+if [[ -n "${TOPIC_BINARY:-}" ]]; then
+  snapshot="$("$TOPIC_BINARY" --once --json)"
+else
+  snapshot="$(cd "$ROOT_DIR/pkg" && go run . --once --json)"
 fi
-
-snapshot="$("$BIN" --once --json)"
 
 if command -v jq >/dev/null 2>&1; then
   printf '%s\n' "$snapshot" | jq -e '

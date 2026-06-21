@@ -6,14 +6,14 @@ import (
 )
 
 // getStaticGPUInfo fetches total memory for each GPU.
-func getStaticGPUInfo(runner CommandRunner) (int, []float64) {
+func getStaticGPUInfo(runner CommandRunner) (int, []float64, error) {
 	outMem, err := runner.Output(nvidiaSMICommand, nvidiaSMIMemoryTotalQuery, nvidiaSMICSVFormat)
 	if err != nil {
-		return 0, nil
+		return 0, nil, err
 	}
 	linesMem := strings.Split(strings.TrimSpace(string(outMem)), "\n")
 	if len(linesMem) == 0 || linesMem[0] == "" {
-		return 0, nil
+		return 0, nil, nil
 	}
 	totals := make([]float64, 0, len(linesMem))
 	for _, line := range linesMem {
@@ -23,7 +23,7 @@ func getStaticGPUInfo(runner CommandRunner) (int, []float64) {
 		}
 		totals = append(totals, mb/bytesPerKB) // Convert MB to GB
 	}
-	return len(totals), totals
+	return len(totals), totals, nil
 }
 
 // updateLiveGPUUsage fetches current GPU utilization and memory usage.

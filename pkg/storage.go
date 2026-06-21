@@ -1,11 +1,14 @@
 package main
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-func getStaticStorageInfoWithProvider(provider StorageProvider) []StorageMount {
+func getStaticStorageInfoWithProvider(provider StorageProvider) ([]StorageMount, error) {
 	partitions, err := provider.Partitions(false)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("list partitions: %w", err)
 	}
 
 	mounts := make([]StorageMount, 0, len(partitions))
@@ -27,8 +30,7 @@ func getStaticStorageInfoWithProvider(provider StorageProvider) []StorageMount {
 		}
 		mounts = append(mounts, mount)
 	}
-
-	return mounts
+	return mounts, nil
 }
 
 // shouldSkipFilesystem determines if a filesystem should be skipped from monitoring.

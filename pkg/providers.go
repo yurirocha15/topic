@@ -13,6 +13,10 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
+// The OS* types below are thin wrappers around stdlib and gopsutil calls.
+// They exist solely to enable dependency injection and mocking in tests.
+// Direct forwarding is intentional — the wrappers provide seam points.
+
 // FileReader defines an interface for reading files.
 type FileReader interface {
 	ReadFile(path string) ([]byte, error)
@@ -60,7 +64,7 @@ func (s OSStater) Stat(path string) (os.FileInfo, error) {
 // ProcessHandle exposes the process data needed by the process table.
 type ProcessHandle interface {
 	PID() int32
-	Ppid() (int32, error)
+	ParentPID() (int32, error)
 	CPUPercent() (float64, error)
 	MemoryInfo() (*process.MemoryInfoStat, error)
 	Username() (string, error)
@@ -117,6 +121,7 @@ func (p OSProcessProvider) Processes() ([]ProcessHandle, error) {
 	return handles, nil
 }
 
+// gopsutilProcessHandle adapts a gopsutil *process.Process to the ProcessHandle interface.
 type gopsutilProcessHandle struct {
 	*process.Process
 }
@@ -125,15 +130,19 @@ func (p gopsutilProcessHandle) PID() int32 {
 	return p.Pid
 }
 
+func (p gopsutilProcessHandle) ParentPID() (int32, error) {
+	return p.Ppid()
+}
+
 // OSProcessSignaler sends a signal to a process by PID.
 type OSProcessSignaler struct{}
 
 func (s OSProcessSignaler) Signal(pid int32, signal os.Signal) error {
-	process, err := os.FindProcess(int(pid))
+	proc, err := os.FindProcess(int(pid))
 	if err != nil {
 		return err
 	}
-	return process.Signal(signal)
+	return proc.Signal(signal)
 }
 
 // OSHostMetricsProvider reads host metrics through gopsutil.

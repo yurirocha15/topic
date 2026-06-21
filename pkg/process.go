@@ -448,8 +448,8 @@ func updateProcessListWithProvider(static *StaticInfo, runner CommandRunner, pro
 	}
 	processList := make([]ProcessInfo, 0, len(procs))
 	for _, p := range procs {
-		pi, ok := getProcessInfo(p, static, gpuProcessMap)
-		if !ok {
+		pi, processErr := getProcessInfo(p, static, gpuProcessMap)
+		if processErr != nil {
 			continue
 		}
 		processList = append(processList, pi)
@@ -460,42 +460,55 @@ func updateProcessListWithProvider(static *StaticInfo, runner CommandRunner, pro
 	return processList
 }
 
+func resolveProcessCommand(p ProcessHandle) (string, error) {
+	cmdline, err := p.Cmdline()
+	if err == nil && cmdline != "" {
+		return cmdline, nil
+	}
+	name, err := p.Name()
+	if err != nil {
+		return "", fmt.Errorf("process name: %w", err)
+	}
+	return "[" + name + "]", nil
+}
+
+func computeContainerPercents(cpuPercent float64, rssBytes uint64, static *StaticInfo) (float64, float64) {
+	cpu := 0.0
+	if static.ContainerCPULimit > 0 {
+		cpu = cpuPercent / static.ContainerCPULimit
+	}
+	mem := 0.0
+	if static.ContainerMemLimitBytes > 0 {
+		mem = (float64(rssBytes) / float64(static.ContainerMemLimitBytes)) * percentMultiplier
+	}
+	return cpu, mem
+}
+
 func getProcessInfo(
 	p ProcessHandle,
 	static *StaticInfo,
 	gpuProcessMap map[int32]GPUProcessInfo,
-) (ProcessInfo, bool) {
+) (ProcessInfo, error) {
 	cpuPercent, err := p.CPUPercent()
 	if err != nil {
-		return ProcessInfo{}, false
+		return ProcessInfo{}, fmt.Errorf("cpu percent: %w", err)
 	}
 	memInfo, err := p.MemoryInfo()
 	if err != nil {
-		return ProcessInfo{}, false
+		return ProcessInfo{}, fmt.Errorf("memory info: %w", err)
 	}
 	user, err := p.Username()
 	if err != nil {
 		user = "n/a"
 	}
-	cmdline, err := p.Cmdline()
-	if err != nil || cmdline == "" {
-		name, nameErr := p.Name()
-		if nameErr != nil {
-			return ProcessInfo{}, false
-		}
-		cmdline = "[" + name + "]"
+	cmdline, err := resolveProcessCommand(p)
+	if err != nil {
+		return ProcessInfo{}, err
 	}
 
-	containerCPUPercent := 0.0
-	if static.ContainerCPULimit > 0 {
-		containerCPUPercent = cpuPercent / static.ContainerCPULimit
-	}
-	containerMemPercent := 0.0
-	if static.ContainerMemLimitBytes > 0 {
-		containerMemPercent = (float64(memInfo.RSS) / float64(static.ContainerMemLimitBytes)) * percentMultiplier
-	}
+	containerCPUPercent, containerMemPercent := computeContainerPercents(cpuPercent, memInfo.RSS, static)
 
-	pi := ProcessInfo{
+	procInfo := ProcessInfo{
 		PID:           p.PID(),
 		User:          user,
 		CPUPercent:    containerCPUPercent,
@@ -509,15 +522,15 @@ func getProcessInfo(
 		OpenFileCount: processOpenFileCount(p),
 	}
 	if gpuInfo, onGPU := gpuProcessMap[p.PID()]; onGPU {
-		pi.GPUIndex = gpuInfo.GPUIndex
-		pi.GPUUtil = gpuInfo.GPUUtil
-		pi.GPUMemPercent = float64(gpuInfo.GPUMemUtil)
+		procInfo.GPUIndex = gpuInfo.GPUIndex
+		procInfo.GPUUtil = gpuInfo.GPUUtil
+		procInfo.GPUMemPercent = float64(gpuInfo.GPUMemUtil)
 	}
-	return pi, true
+	return procInfo, nil
 }
 
 func processParentPID(p ProcessHandle) int32 {
-	ppid, err := p.Ppid()
+	ppid, err := p.ParentPID()
 	if err != nil {
 		return 0
 	}

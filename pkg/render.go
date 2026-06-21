@@ -8,7 +8,6 @@ import (
 	"github.com/rivo/tview"
 )
 
-// updateResourceView updates the current usage statistics panel.
 func updateResourceView(view *tview.TextView, state *State) int {
 	state.dynamic.mu.Lock()
 	defer state.dynamic.mu.Unlock()
@@ -296,17 +295,14 @@ func slicesToBars(labels []string, infos []string, percentages []float64) []BarD
 	return bars
 }
 
-// buildCPUSection creates the CPU usage display section.
 func buildCPUSection(barWidth int, cpuLabel string, cpuInfo string, cpuUsage float64) string {
 	return cpuLabel + makeBar(cpuUsage, barWidth) + cpuInfo + "\n"
 }
 
-// buildMemorySection creates the memory usage display section.
 func buildMemorySection(barWidth int, memLabel string, memInfo string, memPercent float64) string {
 	return memLabel + makeBar(memPercent, barWidth) + memInfo + "\n"
 }
 
-// buildStorageSection creates the storage usage display section.
 func buildStorageSection(layout BarLayout, labels []string, infos []string, percentages []float64) string {
 	return buildBarSection(layout, slicesToBars(labels, infos, percentages))
 }
@@ -315,7 +311,6 @@ func buildStorageSectionBars(layout BarLayout, bars []BarData) string {
 	return buildBarSection(layout, bars)
 }
 
-// buildGPUSection creates the GPU usage display section.
 func buildGPUSection(layout BarLayout, labels []string, infos []string, percentages []float64) string {
 	return buildBarSection(layout, slicesToBars(labels, infos, percentages))
 }

@@ -11,6 +11,8 @@ GOVET=go vet
 
 # Project variables
 BINARY_NAME=topic
+# The Go module lives under pkg/ to keep build artifacts, static assets,
+# and documentation at the repository root separate from source code.
 MODULE_PATH=./pkg/
 OUTPUT_DIR=./dist
 

@@ -112,7 +112,7 @@ func (mph MockProcessHandle) PID() int32 {
 	return mph.pid
 }
 
-func (mph MockProcessHandle) Ppid() (int32, error) {
+func (mph MockProcessHandle) ParentPID() (int32, error) {
 	return mph.ppid, mph.err
 }
 
@@ -1451,7 +1451,10 @@ func TestGetStaticGPUInfo(t *testing.T) {
 		},
 	}
 
-	count, totals := getStaticGPUInfo(mockRunner)
+	count, totals, err := getStaticGPUInfo(mockRunner)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	if count != 2 {
 		t.Fatalf("Expected GPU count of 2, but got %d", count)
@@ -1471,7 +1474,10 @@ func TestGetStaticGPUInfoSkipsMalformedRows(t *testing.T) {
 		},
 	}
 
-	count, totals := getStaticGPUInfo(mockRunner)
+	count, totals, err := getStaticGPUInfo(mockRunner)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if count != 2 {
 		t.Fatalf("Expected GPU count of 2, got %d", count)
 	}
@@ -1487,7 +1493,10 @@ func TestGetStaticGPUInfoEmptyOutput(t *testing.T) {
 		},
 	}
 
-	count, totals := getStaticGPUInfo(mockRunner)
+	count, totals, err := getStaticGPUInfo(mockRunner)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if count != 0 || totals != nil {
 		t.Fatalf("Expected no GPUs for empty output, got count=%d totals=%v", count, totals)
 	}
@@ -1736,7 +1745,7 @@ func TestUpdateAll(t *testing.T) {
 	}
 
 	// Run the function under test.
-	updateAll(state, mockFS, mockRunner)
+	refreshDynamicState(state, mockFS, mockRunner)
 
 	tolerance := 0.1
 
@@ -1895,7 +1904,10 @@ func TestStorageProviderPaths(t *testing.T) {
 		},
 	}
 
-	mounts := getStaticStorageInfoWithProvider(provider)
+	mounts, err := getStaticStorageInfoWithProvider(provider)
+	if err != nil {
+		t.Fatalf("Unexpected error getting static storage info: %v", err)
+	}
 	if len(mounts) != 2 {
 		t.Fatalf("Expected 2 static storage mounts, got %+v", mounts)
 	}
@@ -1908,8 +1920,9 @@ func TestStorageProviderPaths(t *testing.T) {
 		t.Fatalf("Unexpected storage usage: %+v", usage)
 	}
 
-	if got := getStaticStorageInfoWithProvider(MockStorageProvider{err: errors.New("partition failure")}); got != nil {
-		t.Fatalf("Expected nil mounts on partition error, got %+v", got)
+	got, err := getStaticStorageInfoWithProvider(MockStorageProvider{err: errors.New("partition failure")})
+	if got != nil || err == nil {
+		t.Fatalf("Expected nil mounts and error on partition failure, got mounts=%+v err=%v", got, err)
 	}
 	if got := updateStorageUsageWithProvider(nil, provider); got != nil {
 		t.Fatalf("Expected nil usage for no mounts, got %+v", got)
@@ -2180,20 +2193,17 @@ func TestDiscoverKubernetesMetadataWithHooks(t *testing.T) {
 		getenv: func(key string) string {
 			return env[key]
 		},
-		queryKubernetes: func(
-			_ FileReader,
-			host string,
-			namespace string,
-			pod string,
-			token string,
-		) (ContainerMetadata, error) {
-			if host != "10.0.0.1" || namespace != "default" || pod != "topic-pod" || token != "token" {
+		queryKubernetes: func(params kubernetesQueryParams) (ContainerMetadata, error) {
+			if params.host != "10.0.0.1" ||
+				params.namespace != "default" ||
+				params.pod != "topic-pod" ||
+				params.token != "token" {
 				t.Fatalf(
 					"Unexpected Kubernetes query args host=%q namespace=%q pod=%q token=%q",
-					host,
-					namespace,
-					pod,
-					token,
+					params.host,
+					params.namespace,
+					params.pod,
+					params.token,
 				)
 			}
 			return ContainerMetadata{
@@ -2329,7 +2339,7 @@ func TestDiscoverIntegrationsMergesFakeProviders(t *testing.T) {
 		queryDocker: func(_ string) (ContainerMetadata, error) {
 			return ContainerMetadata{Name: "docker-name", Image: "docker-image"}, nil
 		},
-		queryKubernetes: func(_ FileReader, _ string, _ string, _ string, _ string) (ContainerMetadata, error) {
+		queryKubernetes: func(_ kubernetesQueryParams) (ContainerMetadata, error) {
 			return ContainerMetadata{Pod: "topic-pod", Namespace: "default", Image: "kube-image"}, nil
 		},
 	}

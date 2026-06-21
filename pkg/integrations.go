@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -38,11 +38,19 @@ const (
 	nvmlLibraryPath          = "/usr/lib/libnvidia-ml.so"
 )
 
+type kubernetesQueryParams struct {
+	fs        FileReader
+	host      string
+	namespace string
+	pod       string
+	token     string
+}
+
 type integrationProbe struct {
 	stat            func(string) (os.FileInfo, error)
 	getenv          func(string) string
 	queryDocker     func(string) (ContainerMetadata, error)
-	queryKubernetes func(FileReader, string, string, string, string) (ContainerMetadata, error)
+	queryKubernetes func(kubernetesQueryParams) (ContainerMetadata, error)
 }
 
 func discoverIntegrations(fs FileReader, config AppConfig) (ContainerMetadata, []IntegrationStatus) {
@@ -61,13 +69,13 @@ func discoverIntegrationsWithProbe(
 	dockerMetadata, dockerStatus := discoverDockerMetadataWithProbe(fs, config, probe)
 	statuses = append(statuses, dockerStatus)
 	if dockerStatus.Available {
-		metadata = mergeMetadata(metadata, dockerMetadata)
+		metadata.MergeFrom(dockerMetadata)
 	}
 
 	kubernetesMetadata, kubernetesStatus := discoverKubernetesMetadataWithProbe(fs, config, probe)
 	statuses = append(statuses, kubernetesStatus)
 	if kubernetesStatus.Available {
-		metadata = mergeMetadata(metadata, kubernetesMetadata)
+		metadata.MergeFrom(kubernetesMetadata)
 	}
 
 	statuses = append(statuses, discoverNVMLStatusWithProbe(config, probe))
@@ -95,7 +103,10 @@ func discoverDockerMetadataWithProbe(
 	}
 	metadata, err := probe.queryDocker(containerID)
 	if err != nil {
-		return ContainerMetadata{}, IntegrationStatus{Name: integrationDocker, Detail: err.Error()}
+		return ContainerMetadata{}, IntegrationStatus{
+			Name:   integrationDocker,
+			Detail: fmt.Sprintf("docker query failed: %v", err),
+		}
 	}
 	metadata.Runtime = integrationDocker
 	return metadata, IntegrationStatus{Name: integrationDocker, Available: true, Detail: integrationAvailable}
@@ -162,7 +173,7 @@ func queryDockerContainer(containerID string) (ContainerMetadata, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return ContainerMetadata{}, errors.New(resp.Status)
+		return ContainerMetadata{}, fmt.Errorf("docker API returned %s", resp.Status)
 	}
 	var payload struct {
 		ID     string `json:"Id"`
@@ -201,7 +212,7 @@ func discoverKubernetesMetadataWithProbe(
 	if err != nil {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationKubernetes, Detail: "namespace not available"}
 	}
-	tokenBytes, err := fs.ReadFile(kubernetesTokenPath)
+	token, err := readKubernetesToken(fs)
 	if err != nil {
 		return ContainerMetadata{}, IntegrationStatus{Name: integrationKubernetes, Detail: "token not available"}
 	}
@@ -212,26 +223,25 @@ func discoverKubernetesMetadataWithProbe(
 		Pod:       pod,
 		Node:      probe.getenv(kubernetesNodeNameEnv),
 	}
-	token := strings.TrimSpace(string(tokenBytes))
-	if podMetadata, queryErr := probe.queryKubernetes(fs, host, namespace, pod, token); queryErr == nil {
-		metadata = mergeMetadata(metadata, podMetadata)
+	if podMetadata, queryErr := probe.queryKubernetes(kubernetesQueryParams{
+		fs:        fs,
+		host:      host,
+		namespace: namespace,
+		pod:       pod,
+		token:     token,
+	}); queryErr == nil {
+		metadata.MergeFrom(podMetadata)
 	}
 	return metadata, IntegrationStatus{Name: integrationKubernetes, Available: true, Detail: integrationAvailable}
 }
 
-func queryKubernetesPod(
-	fs FileReader,
-	host string,
-	namespace string,
-	pod string,
-	token string,
-) (ContainerMetadata, error) {
+func queryKubernetesPod(params kubernetesQueryParams) (ContainerMetadata, error) {
 	port := os.Getenv(kubernetesServicePortEnv)
 	if port == "" {
 		port = "443"
 	}
 	certPool := x509.NewCertPool()
-	if ca, err := fs.ReadFile(kubernetesCAPath); err == nil {
+	if ca, err := params.fs.ReadFile(kubernetesCAPath); err == nil {
 		certPool.AppendCertsFromPEM(ca)
 	}
 	client := http.Client{
@@ -241,7 +251,8 @@ func queryKubernetesPod(
 			MinVersion: tls.VersionTLS12,
 		}},
 	}
-	url := "https://" + net.JoinHostPort(host, port) + "/api/v1/namespaces/" + namespace + "/pods/" + pod
+	url := "https://" + net.JoinHostPort(params.host, port) +
+		"/api/v1/namespaces/" + params.namespace + "/pods/" + params.pod
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	defer cancel()
 	// #nosec G107,G704 -- host/port come from Kubernetes service environment in the current pod.
@@ -249,7 +260,7 @@ func queryKubernetesPod(
 	if err != nil {
 		return ContainerMetadata{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+params.token)
 	// #nosec G704 -- request URL is constrained to the Kubernetes API service above.
 	resp, err := client.Do(req)
 	if err != nil {
@@ -257,7 +268,7 @@ func queryKubernetesPod(
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return ContainerMetadata{}, errors.New(resp.Status)
+		return ContainerMetadata{}, fmt.Errorf("kubernetes API returned %s", resp.Status)
 	}
 	return parseKubernetesPod(resp.Body)
 }
@@ -342,30 +353,10 @@ func (probe integrationProbe) withDefaults() integrationProbe {
 	return probe
 }
 
-func mergeMetadata(base ContainerMetadata, next ContainerMetadata) ContainerMetadata {
-	if next.Runtime != "" {
-		base.Runtime = next.Runtime
+func readKubernetesToken(fs FileReader) (string, error) {
+	tokenBytes, err := fs.ReadFile(kubernetesTokenPath)
+	if err != nil {
+		return "", err
 	}
-	if next.ID != "" {
-		base.ID = next.ID
-	}
-	if next.Name != "" {
-		base.Name = next.Name
-	}
-	if next.Image != "" {
-		base.Image = next.Image
-	}
-	if next.Namespace != "" {
-		base.Namespace = next.Namespace
-	}
-	if next.Pod != "" {
-		base.Pod = next.Pod
-	}
-	if next.Node != "" {
-		base.Node = next.Node
-	}
-	if len(next.Labels) > 0 {
-		base.Labels = next.Labels
-	}
-	return base
+	return strings.TrimSpace(string(tokenBytes)), nil
 }

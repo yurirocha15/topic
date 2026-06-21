@@ -51,6 +51,34 @@ type ContainerMetadata struct {
 	Labels    map[string]string `json:"labels,omitempty"`
 }
 
+// MergeFrom copies non-empty fields from other into m.
+func (m *ContainerMetadata) MergeFrom(other ContainerMetadata) {
+	if other.Runtime != "" {
+		m.Runtime = other.Runtime
+	}
+	if other.ID != "" {
+		m.ID = other.ID
+	}
+	if other.Name != "" {
+		m.Name = other.Name
+	}
+	if other.Image != "" {
+		m.Image = other.Image
+	}
+	if other.Namespace != "" {
+		m.Namespace = other.Namespace
+	}
+	if other.Pod != "" {
+		m.Pod = other.Pod
+	}
+	if other.Node != "" {
+		m.Node = other.Node
+	}
+	if len(other.Labels) > 0 {
+		m.Labels = other.Labels
+	}
+}
+
 type IntegrationStatus struct {
 	Name      string `json:"name"`
 	Available bool   `json:"available"`
@@ -251,6 +279,8 @@ type DynamicCollectorSet struct {
 }
 
 // State holds the application's entire state.
+// Fields are unexported to enforce snapshot-based access; use accessor
+// methods to read values and the refresh functions to update them.
 type State struct {
 	static       StaticInfo
 	dynamic      DynamicInfo
@@ -262,6 +292,13 @@ type State struct {
 	prevNetTime  time.Time
 	prevDiskTime time.Time
 	history      MetricsHistory
+}
+
+// Static returns a copy of the static configuration.
+func (s *State) Static() StaticInfo {
+	s.dynamic.mu.Lock()
+	defer s.dynamic.mu.Unlock()
+	return s.static
 }
 
 type NetworkCounter struct {
