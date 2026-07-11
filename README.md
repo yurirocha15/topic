@@ -2,7 +2,6 @@
 
 ![TOPIC](./static/img/topic_title.png)
 
-
 ### topic: top inside a container
 
 **A `top`-like tool for containers that displays resource usage based on cgroup limits, not the host's resources.**
@@ -26,7 +25,18 @@ For example, a container with a **2GB memory limit** on a 128GB host may be usin
 
 This provides an accurate view of how close a container is to its resource boundaries, without the need to access the host or external monitoring tools.
 
-![Screenshot of topic in action](./static/img/topic.png)
+![Current topic dashboard showing system metrics and the process table](./static/img/topic.png)
+
+The screenshot is captured inside a demo container limited to 2 CPUs, 2 GiB of memory, and 256 PIDs, with a synthetic CUDA workload using an attached GPU.
+
+### Dashboard
+
+The system panel adapts to the terminal width. Wide terminals use two aligned resource columns; narrower terminals switch to one column and truncate secondary details before hiding primary measurements.
+
+- CPU, memory, storage, and GPU rows share the same label, percentage, bar, and detail alignment.
+- Network and disk throughput, PID usage, cgroup pressure, and metric history use a shared label gutter for quick scanning.
+- Utilization is green below 70%, gold from 70% to 89.9%, and red at 90% or above.
+- Docker, Kubernetes, and NVIDIA/NVML availability is shown in the compact status panel. Missing integrations remain non-fatal.
 
 ---
 
@@ -39,9 +49,10 @@ curl -s https://raw.githubusercontent.com/yurirocha15/topic/master/install.sh | 
 ```
 
 or for containers based on `alpine`:
+
 ```bash
 wget -qO- https://raw.githubusercontent.com/yurirocha15/topic/master/install.sh | sh
-``` 
+```
 
 The script will attempt to install to `/usr/local/bin` (prompting for `sudo` if needed). If that fails, it will fall back to `$HOME/.local/bin` and notify you if you need to add this directory to your `PATH`.
 
@@ -64,6 +75,7 @@ topic --no-docker        # disable Docker metadata lookup
 topic --no-kubernetes    # disable Kubernetes metadata lookup
 topic --no-nvml          # disable NVML/NVIDIA integration status
 topic --ascii            # start with the large ASCII logo visible
+topic --once             # print one text snapshot and exit
 topic --once --json      # print one JSON snapshot for scripts
 topic --sort=mem         # initial sort: cpu, mem, gpu, gpumem, pid, user, command
 ```
@@ -86,6 +98,7 @@ topic --sort=mem         # initial sort: cpu, mem, gpu, gpumem, pid, user, comma
 ### Building from Source
 
 If you prefer to build the project yourself, you will need:
+
 * Go (version 1.23 or later)
 * `make`
 
@@ -98,6 +111,26 @@ make build
 ```
 
 The compiled binary will be available at `./dist/topic`.
+
+### Testing
+
+Run the standard validation gates from the repository root:
+
+```bash
+make test
+make lint
+make build
+```
+
+Race detection and benchmarks run directly from the Go module:
+
+```bash
+cd pkg
+go test -race ./...
+go test -bench=. -benchmem -count=5 ./...
+```
+
+The test suite includes simulated TUI renders at compact, medium, and wide terminal sizes, plus input-flow coverage for filtering, sorting, process details, and clean shutdown.
 
 ### Testing Integrations
 
