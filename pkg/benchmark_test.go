@@ -18,14 +18,14 @@ func BenchmarkMakeBar(b *testing.B) {
 
 func BenchmarkCalculateBarWidth(b *testing.B) {
 	labels := []string{
-		"CPU: [yellow]72.5  %[white] ",
-		"MEM: [yellow]61.2  %[white] ",
-		"DISK /data:    [yellow]48.8%[white]",
+		metricCPULabel,
+		metricMemoryLabel,
+		"DISK /data",
 	}
 	infos := []string{
-		" [darkcyan](limit: 4.00 CPUs)[white]",
-		" [darkcyan]3.672 GB / 6.000 GB[white]",
-		"[darkcyan]48.80 GB / 100.00 GB[white]",
+		"4.00 CPU limit",
+		"3.67 / 6.00 GB",
+		"48.80 / 100.00 GB",
 	}
 
 	for range b.N {
@@ -134,22 +134,22 @@ func BenchmarkCollectDynamicInfoFake(b *testing.B) {
 
 func storageSectionBenchmarkFixture() (BarLayout, []string, []string, []float64) {
 	labels := []string{
-		"DISK /:        [yellow] 38.2%[white]",
-		"DISK /data:    [yellow] 71.4%[white]",
-		"DISK /logs:    [yellow] 12.9%[white]",
-		"DISK /cache:   [yellow] 55.0%[white]",
+		"DISK /",
+		"DISK /data",
+		"DISK /logs",
+		"DISK /cache",
 	}
 	infos := []string{
-		"[darkcyan]38.20 GB / 100.00 GB[white]",
-		"[darkcyan]71.40 GB / 100.00 GB[white]",
-		"[darkcyan]12.90 GB / 100.00 GB[white]",
-		"[darkcyan]55.00 GB / 100.00 GB[white]",
+		"38.20 / 100.00 GB",
+		"71.40 / 100.00 GB",
+		"12.90 / 100.00 GB",
+		"55.00 / 100.00 GB",
 	}
 	percentages := []float64{38.2, 71.4, 12.9, 55.0}
 	maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromSlices(labels, infos)
 	layout := BarLayout{
 		Columns:       2,
-		BarWidth:      40,
+		BarWidth:      30,
 		TotalWidth:    150,
 		MaxLabelWidth: maxLabelWidth,
 		MaxInfoWidth:  maxInfoWidth,

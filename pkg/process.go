@@ -53,17 +53,21 @@ func updateProcessTable(table *tview.Table, state *State) {
 	// --- Create Header ---
 	headers := processTableHeaders(ui)
 	for i, header := range headers {
-		setTableCell(table, 0, i, header, tcell.ColorYellow, false, 0)
+		color := tcell.ColorLightGray
+		if i == processSortHeaderIndex(ui.ProcessSort) {
+			color = tcell.ColorAqua
+		}
+		setTableCell(table, 0, i, header, color, false, 0)
 	}
 
 	// --- Populate Data ---
 	for r, p := range processes {
 		// PID
 		columnIdx := 0
-		setTableCell(table, r+1, columnIdx, strconv.Itoa(int(p.PID)), tcell.ColorWhite, true, 0)
+		setTableCell(table, r+1, columnIdx, strconv.Itoa(int(p.PID)), tcell.ColorGray, true, 0)
 		// USER
 		columnIdx++
-		setTableCell(table, r+1, columnIdx, p.User, tcell.ColorGreen, true, 0)
+		setTableCell(table, r+1, columnIdx, p.User, tcell.ColorLightGray, true, 0)
 		// %CPU
 		columnIdx++
 		setTableCell(
@@ -71,7 +75,7 @@ func updateProcessTable(table *tview.Table, state *State) {
 			r+1,
 			columnIdx,
 			strconv.FormatFloat(p.CPUPercent, 'f', 1, 64),
-			tcell.ColorAqua,
+			usageCellColor(p.CPUPercent),
 			true,
 			0,
 		)
@@ -82,7 +86,7 @@ func updateProcessTable(table *tview.Table, state *State) {
 			r+1,
 			columnIdx,
 			strconv.FormatFloat(p.MemPercent, 'f', 1, 64),
-			tcell.ColorAqua,
+			usageCellColor(p.MemPercent),
 			true,
 			0,
 		)
@@ -95,7 +99,7 @@ func updateProcessTable(table *tview.Table, state *State) {
 				r+1,
 				columnIdx,
 				strconv.FormatUint(p.GPUUtil, 10),
-				tcell.ColorFuchsia,
+				usageCellColor(float64(p.GPUUtil)),
 				true,
 				0,
 			)
@@ -105,7 +109,7 @@ func updateProcessTable(table *tview.Table, state *State) {
 				r+1,
 				columnIdx,
 				strconv.FormatFloat(p.GPUMemPercent, 'f', 1, 64),
-				tcell.ColorFuchsia,
+				usageCellColor(p.GPUMemPercent),
 				true,
 				0,
 			)

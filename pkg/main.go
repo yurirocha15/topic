@@ -31,18 +31,18 @@ const (
 	bytesPerGB                = bytesPerMB * 1024 // Bytes per gigabyte
 	nanosecondsToMicroseconds = 1000              // Nanoseconds to microseconds
 	secondToMicroseconds      = 1e6               // Seconds to microseconds
-	minBarWidth               = 20                // Minimum width for a progress bar
-	columnSpacing             = 5                 // Spacing between columns
+	minBarWidth               = 20                // Preferred minimum width for a progress bar
+	maxBarWidth               = 30                // Keep wide-terminal bars compact and scannable
+	compactBarWidth           = 4                 // Smallest useful bar when the terminal is constrained
+	columnSpacing             = 5                 // Width of the divider between metric columns
 	maxDisplayPathLength      = 15                // Maximum length for mount path display
-	maxReadableColumns        = 4                 // Practical limit for readability
-	maxGPUColumns             = 2                 // Maximum columns for GPU display
-	maxDiskColumns            = 2                 // Maximum columns for Disk display
-	spacesAroundBar           = 2                 // Number of spaces around bar (before and after)
-	estimatedInfoWidth        = 25                // Estimated width for typical info text
-	minLabelWidth             = 15                // Minimum width for labels (e.g., "DISK /:        ")
-	percentageWidth           = 5                 // Width for percentage display (e.g., " 26.3%")
-	minColumnWidth            = 70                // Minimum width required per column
-	minTotalWidthForMultiCol  = 150               // Minimum total width to use multi-column
+	metricFieldSpacing        = 2                 // Space between label, value, bar, and detail
+	metricLeadingFieldGaps    = 2                 // Gaps between label, value, and bar
+	metricPercentWidth        = 6                 // Visible width of a percentage value
+	maxMetricLabelWidth       = 18                // Prevent long device labels from shifting the grid
+	minMetricInfoWidth        = 10                // Smallest useful detail field before it is hidden
+	minMetricColumnWidth      = 57                // Minimum readable width for one resource column
+	activityLabelWidth        = 14                // Shared label gutter for activity and history rows
 	commandTimeout            = 2 * time.Second   // Maximum time allowed for external probes
 	cgroupMaxToken            = "max"             // Cgroup token for unlimited resources
 	cgroupCPUMaxPath          = "/sys/fs/cgroup/cpu.max"
@@ -76,6 +76,8 @@ const (
 	signalTermLabel           = "SIGTERM"
 	signalKillLabel           = "SIGKILL"
 	signalIntLabel            = "SIGINT"
+	metricCPULabel            = "CPU"
+	metricMemoryLabel         = "MEMORY"
 )
 
 // --- Main Application ---
@@ -249,13 +251,16 @@ func currentInfoPanelWidth(state *State) int {
 func compactInfoText(ui UIState, statuses []IntegrationStatus) string {
 	integrations := strings.TrimSpace(integrationStatusText(statuses))
 	if integrations == "" {
-		integrations = "[darkgrey]Integrations: none"
+		integrations = themeMutedTag + "Integrations: none" + themeResetTag
 	}
 	return fmt.Sprintf(
-		"[::b]topic[white] [darkgrey]top inside a container\n"+
-			"[darkgrey]Mode: %s  [darkgrey]Sort: [yellow]%s[darkgrey]  Filter: %s\n"+
+		themeStrongTag+"topic"+themeStyleResetTag+" "+themeMutedTag+"top inside a container"+themeResetTag+"\n"+
+			themeMutedTag+"Mode "+themeResetTag+"%s  "+themeMutedTag+"Sort "+themeResetTag+"%s  "+
+			themeMutedTag+"Filter "+themeResetTag+"%s\n"+
 			"%s\n"+
-			"[darkgrey]Keys: q quit  / filter  s sort  p pause  t tree  Enter details  ? help  a logo\n",
+			themeMutedTag+"Keys  "+themeResetTag+"q quit  p pause  ? help\n"+
+			themeMutedTag+"Modes "+themeResetTag+"/ filter  s sort  t tree\n"+
+			themeMutedTag+"View  "+themeResetTag+"Enter details  a logo\n",
 		infoModeText(ui),
 		sortStatusText(ui),
 		filterStatusText(ui),
@@ -266,26 +271,26 @@ func compactInfoText(ui UIState, statuses []IntegrationStatus) string {
 func infoModeText(ui UIState) string {
 	switch {
 	case ui.SearchMode:
-		return "[yellow]filter[white]"
+		return themeAttentionTag + "filter" + themeResetTag
 	case ui.SortMode:
-		return "[yellow]sort[white]"
+		return themeAttentionTag + "sort" + themeResetTag
 	case ui.Paused:
-		return "[yellow]paused[white]"
+		return themeAttentionTag + "paused" + themeResetTag
 	default:
-		return "[green]live[white]"
+		return "[green]live" + themeResetTag
 	}
 }
 
 func filterStatusText(ui UIState) string {
 	if ui.ProcessFilter == "" {
-		return "[darkgrey]-"
+		return themeMutedTag + "-" + themeResetTag
 	}
 	filter := ui.ProcessFilter
-	const maxFilterStatusWidth = 14
+	const maxFilterStatusWidth = 13
 	if len([]rune(filter)) > maxFilterStatusWidth {
 		filter = string([]rune(filter)[:maxFilterStatusWidth-1]) + "…"
 	}
-	return "[yellow]" + filter + "[white]"
+	return themeAttentionTag + filter + themeResetTag
 }
 
 func sortStatusText(ui UIState) string {
@@ -293,7 +298,7 @@ func sortStatusText(ui UIState) string {
 	if ui.ReverseSort {
 		direction = "↑"
 	}
-	return processSortColumnLabel(ui.ProcessSort) + direction
+	return themeAccentTag + processSortColumnLabel(ui.ProcessSort) + direction + themeResetTag
 }
 
 func processSortColumnLabel(column ProcessSortColumn) string {
@@ -322,16 +327,25 @@ func integrationStatusText(statuses []IntegrationStatus) string {
 		return ""
 	}
 	var builder strings.Builder
-	builder.WriteString("\n[darkgrey]Integrations:")
+	builder.WriteByte('\n')
+	builder.WriteString(themeMutedTag)
+	builder.WriteString("Integrations:")
+	builder.WriteString(themeResetTag)
 	for _, status := range statuses {
 		marker := "-"
+		markerTag := themeMutedTag
 		if status.Available {
 			marker = "+"
+			markerTag = "[green]"
 		}
+		builder.WriteString(themeMutedTag)
 		builder.WriteString(" ")
 		builder.WriteString(status.Name)
 		builder.WriteString("=")
+		builder.WriteString(themeResetTag)
+		builder.WriteString(markerTag)
 		builder.WriteString(marker)
+		builder.WriteString(themeResetTag)
 	}
 	return builder.String()
 }

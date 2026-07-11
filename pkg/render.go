@@ -22,104 +22,69 @@ func updateResourceView(view *tview.TextView, state *State) int {
 }
 
 func buildResourceText(availableWidth int, state *State) string {
-	var builder strings.Builder
-
+	resourceBars := make([]BarData, 0, 2+len(state.dynamic.StorageUsage)+len(state.dynamic.LiveGPUUsage)*barsPerGPU)
 	cpuLabel, cpuInfo, cpuUsage := calculateCPULabelInfo(state)
+	resourceBars = append(resourceBars, newBarData(cpuLabel, cpuUsage, cpuInfo))
 	memLabel, memInfo, memPercent := calculateMEMLabelInfo(state)
-	cpuMemBarWidth := calculateBarWidth(availableWidth, []string{cpuLabel, memLabel}, []string{cpuInfo, memInfo})
-	builder.WriteString(buildCPUSection(cpuMemBarWidth, cpuLabel, cpuInfo, cpuUsage))
-	builder.WriteString(buildMemorySection(cpuMemBarWidth, memLabel, memInfo, memPercent))
-
-	// Calculate unified bar width for DISK and GPU sections.
-	var storageBars []BarData
-	var gpuBars []BarData
-	var diskGPUBars []BarData
-
-	if len(state.dynamic.StorageUsage) > 0 {
-		storageBars = calculateStorageBars(state)
-		diskGPUBars = append(diskGPUBars, storageBars...)
-	}
+	resourceBars = append(resourceBars, newBarData(memLabel, memPercent, memInfo))
+	resourceBars = append(resourceBars, calculateStorageBars(state)...)
 	if state.static.GPUCount > 0 {
-		gpuBars = calculateGPUBars(state)
-		diskGPUBars = append(diskGPUBars, gpuBars...)
+		resourceBars = append(resourceBars, calculateGPUBars(state)...)
 	}
 
-	// Determine if DISK/GPU should use multi-column layout
-	var sharedLayout BarLayout
-	if len(diskGPUBars) > 0 {
-		// Calculate unified max widths from all combined labels and infos for proper alignment
-		maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromBars(diskGPUBars)
-
-		// Determine the layout for all DISK/GPU entries combined
-		totalEntries := len(diskGPUBars)
-		maxColumns := maxDiskColumns
-		if totalEntries == 1 {
-			maxColumns = 1
-		}
-
-		// Force single column if terminal is too narrow for multi-column
-		if availableWidth < minTotalWidthForMultiCol || maxColumns == 1 {
-			// Single column layout
-			sharedLayout = BarLayout{
-				Columns:       1,
-				BarWidth:      calculateBarWidthFromBars(availableWidth, diskGPUBars),
-				TotalWidth:    availableWidth,
-				MaxLabelWidth: maxLabelWidth,
-				MaxInfoWidth:  maxInfoWidth,
-			}
-		} else {
-			// Multi-column layout - calculate based on actual content dimensions
-			spacingWidth := (maxColumns - 1) * columnSpacing
-			availableContentWidth := availableWidth - spacingWidth
-
-			// Calculate actual space required per column
-			actualSpacePerColumn := maxLabelWidth + spacesAroundBar + minBarWidth + spacesAroundBar + maxInfoWidth
-
-			// Check if we have enough space for the requested columns
-			if availableContentWidth < actualSpacePerColumn*maxColumns {
-				// Not enough space for multi-column, force single column
-				sharedLayout = BarLayout{
-					Columns:       1,
-					BarWidth:      calculateBarWidthFromBars(availableWidth, diskGPUBars),
-					TotalWidth:    availableWidth,
-					MaxLabelWidth: maxLabelWidth,
-					MaxInfoWidth:  maxInfoWidth,
-				}
-			} else {
-				// We can fit multi-column layout
-				widthPerColumn := availableContentWidth / maxColumns
-				barWidth := calculateBarWidthFromBars(widthPerColumn, diskGPUBars)
-				totalWidth := maxColumns*widthPerColumn + spacingWidth
-
-				sharedLayout = BarLayout{
-					Columns:       maxColumns,
-					BarWidth:      barWidth,
-					TotalWidth:    totalWidth,
-					MaxLabelWidth: maxLabelWidth,
-					MaxInfoWidth:  maxInfoWidth,
-				}
-			}
-		}
+	var builder strings.Builder
+	layout := calculateResourceLayout(availableWidth, resourceBars)
+	for _, row := range makeAlignedMultiColumnBars(resourceBars, layout) {
+		builder.WriteString(row)
+		builder.WriteByte('\n')
 	}
-
-	// Build sections with unified layout and bar width
-	if len(storageBars) > 0 {
-		appendResourceSection(&builder, buildStorageSectionBars(sharedLayout, storageBars))
-	}
-	if len(gpuBars) > 0 {
-		appendResourceSection(&builder, buildGPUSectionBars(sharedLayout, gpuBars))
-	}
-	appendResourceSection(&builder, buildMetricsSection(state, availableWidth))
+	builder.WriteString(buildMetricsSection(state, availableWidth))
 
 	return builder.String()
 }
 
-func appendResourceSection(builder *strings.Builder, section string) {
-	section = strings.TrimLeft(section, "\n")
-	if section == "" {
-		return
+func calculateResourceLayout(availableWidth int, bars []BarData) BarLayout {
+	if availableWidth < 0 {
+		availableWidth = 0
 	}
-	builder.WriteString(section)
+	maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromBars(bars)
+	if maxLabelWidth > maxMetricLabelWidth {
+		maxLabelWidth = maxMetricLabelWidth
+	}
+
+	columns := 1
+	if len(bars) > 1 && availableWidth >= minMetricColumnWidth*2+columnSpacing {
+		columns = 2
+	}
+	spacingWidth := (columns - 1) * columnSpacing
+	columnWidth := 0
+	if availableWidth > spacingWidth {
+		columnWidth = (availableWidth - spacingWidth) / columns
+	}
+
+	maxLabelThatFits := columnWidth - metricPercentWidth -
+		metricFieldSpacing*metricLeadingFieldGaps - compactBarWidth
+	if maxLabelWidth > maxLabelThatFits {
+		maxLabelWidth = max(0, maxLabelThatFits)
+	}
+
+	remainingWidth := columnWidth - maxLabelWidth - metricPercentWidth -
+		metricFieldSpacing*metricLeadingFieldGaps
+	barWidth := min(maxBarWidth, max(0, remainingWidth))
+	renderedInfoWidth := 0
+	availableInfoWidth := remainingWidth - metricFieldSpacing - minBarWidth
+	if maxInfoWidth > 0 && availableInfoWidth >= minMetricInfoWidth {
+		renderedInfoWidth = min(maxInfoWidth, availableInfoWidth)
+		barWidth = min(maxBarWidth, remainingWidth-metricFieldSpacing-renderedInfoWidth)
+	}
+
+	return BarLayout{
+		Columns:       columns,
+		BarWidth:      max(0, barWidth),
+		TotalWidth:    columnWidth*columns + spacingWidth,
+		MaxLabelWidth: maxLabelWidth,
+		MaxInfoWidth:  renderedInfoWidth,
+	}
 }
 
 // calculateCPULabelInfo calculates the CPU label, info text, and usage percentage.
@@ -129,13 +94,13 @@ func calculateCPULabelInfo(state *State) (string, string, float64) {
 	if state.static.ContainerCPULimit == float64(state.static.HostCores) {
 		// Running outside container or no cgroup limit - use host metrics
 		usage = state.dynamic.HostCPUUsage
-		label = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", usage)
-		info = fmt.Sprintf(" [darkcyan](no cgroup limit, %d host cores)[white]", state.static.HostCores)
+		label = metricCPULabel
+		info = fmt.Sprintf("%d cores, no limit", state.static.HostCores)
 	} else {
 		// Running inside container with limits
 		usage = state.dynamic.ContainerCPUUsage
-		label = fmt.Sprintf("CPU: [yellow]%-6.1f%%[white] ", usage)
-		info = fmt.Sprintf(" [darkcyan](limit: %.2f CPUs)[white]", state.static.ContainerCPULimit)
+		label = metricCPULabel
+		info = fmt.Sprintf("%.2f CPU limit", state.static.ContainerCPULimit)
 	}
 	return label, info, usage
 }
@@ -149,18 +114,18 @@ func calculateMEMLabelInfo(state *State) (string, string, float64) {
 		if state.static.HostMemTotalGB > 0 {
 			percent = (state.dynamic.HostMemUsedGB / state.static.HostMemTotalGB) * percentMultiplier
 		}
-		label = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", percent)
+		label = metricMemoryLabel
 		info = fmt.Sprintf(
-			" [darkcyan]%.3f GB / %.3f GB (no cgroup limit)[white]",
+			"%.2f / %.2f GB, no limit",
 			state.dynamic.HostMemUsedGB,
 			state.static.HostMemTotalGB,
 		)
 	} else {
 		// Running inside container with limits
 		percent = (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
-		label = fmt.Sprintf("MEM: [yellow]%-6.1f%%[white] ", percent)
+		label = metricMemoryLabel
 		info = fmt.Sprintf(
-			" [darkcyan]%.3f GB / %.3f GB[white]",
+			"%.2f / %.2f GB",
 			state.dynamic.ContainerMemUsedGB,
 			state.static.ContainerMemLimitGB,
 		)
@@ -171,38 +136,20 @@ func calculateMEMLabelInfo(state *State) (string, string, float64) {
 // calculateBarWidth calculates optimal bar width given available width and label/info text arrays.
 // This is a general function that can be reused across different sections.
 func calculateBarWidth(availableWidth int, labels []string, infos []string) int {
-	// Find maximum label width
-	maxLabelWidth := 0
-	for _, label := range labels {
-		if width := tview.TaggedStringWidth(label); width > maxLabelWidth {
-			maxLabelWidth = width
+	count := max(len(labels), len(infos))
+	bars := make([]BarData, 0, count)
+	for index := range count {
+		label := ""
+		if index < len(labels) {
+			label = labels[index]
 		}
-	}
-
-	// Find maximum info width
-	maxInfoWidth := 0
-	for _, info := range infos {
-		if width := tview.TaggedStringWidth(info); width > maxInfoWidth {
-			maxInfoWidth = width
+		info := ""
+		if index < len(infos) {
+			info = infos[index]
 		}
+		bars = append(bars, newBarData(label, 0, info))
 	}
-
-	// Calculate consistent bar width
-	barWidth := availableWidth - maxLabelWidth - maxInfoWidth
-	if barWidth < minBarWidth {
-		barWidth = minBarWidth
-	}
-
-	return barWidth
-}
-
-func calculateBarWidthFromBars(availableWidth int, bars []BarData) int {
-	maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromBars(bars)
-	barWidth := availableWidth - maxLabelWidth - maxInfoWidth
-	if barWidth < minBarWidth {
-		barWidth = minBarWidth
-	}
-	return barWidth
+	return calculateResourceLayout(availableWidth, bars).BarWidth
 }
 
 func newBarData(label string, percent float64, info string) BarData {
@@ -229,14 +176,10 @@ func calculateStorageBars(state *State) []BarData {
 			displayPath = "..." + displayPath[len(displayPath)-12:]
 		}
 
-		// Format as: "DISK /:" with right-aligned percentage
-		label := fmt.Sprintf("DISK %s:", displayPath)
-		percentage := fmt.Sprintf("%5.1f%%", storage.UsedPercent)
-		formattedLabel := fmt.Sprintf("%-*s[yellow]%s[white]", minLabelWidth, label, percentage)
+		label := fmt.Sprintf("DISK %s", displayPath)
+		info := fmt.Sprintf("%.2f / %.2f GB", storage.UsedGB, storage.UsedGB+storage.FreeGB)
 
-		info := fmt.Sprintf("[darkcyan]%.2f GB / %.2f GB[white]", storage.UsedGB, storage.UsedGB+storage.FreeGB)
-
-		bars = append(bars, newBarData(formattedLabel, storage.UsedPercent, info))
+		bars = append(bars, newBarData(label, storage.UsedPercent, info))
 	}
 	return bars
 }
@@ -249,28 +192,22 @@ func calculateGPULabelsInfo(state *State) ([]string, []string, []float64) {
 func calculateGPUBars(state *State) []BarData {
 	bars := make([]BarData, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
 	for i, gpu := range state.dynamic.LiveGPUUsage {
-		// GPU Utilization - Format as: "GPU0 Util:" with right-aligned percentage
-		utilLabel := fmt.Sprintf("GPU%d Util:", i)
-		utilPercentage := fmt.Sprintf("%5d%%", gpu.Utilization)
-		formattedUtilLabel := fmt.Sprintf("%-*s[yellow]%s[white]", minLabelWidth, utilLabel, utilPercentage)
-
-		bars = append(bars, newBarData(formattedUtilLabel, float64(gpu.Utilization), ""))
+		utilLabel := fmt.Sprintf("GPU%d UTIL", i)
+		bars = append(bars, newBarData(utilLabel, float64(gpu.Utilization), ""))
 
 		// GPU Memory - Format as: "GPU0 Mem:" with right-aligned percentage
 		gpuMemPercent := 0.0
 		if len(state.static.GPUTotalGB) > i && state.static.GPUTotalGB[i] > 0 {
 			gpuMemPercent = (gpu.MemUsedGB / state.static.GPUTotalGB[i]) * percentMultiplier
 		}
-		memLabel := fmt.Sprintf("GPU%d Mem:", i)
-		memPercentage := fmt.Sprintf("%5.0f%%", gpuMemPercent)
-		formattedMemLabel := fmt.Sprintf("%-*s[yellow]%s[white]", minLabelWidth, memLabel, memPercentage)
+		memLabel := fmt.Sprintf("GPU%d MEM", i)
 
 		var memInfo string
 		if len(state.static.GPUTotalGB) > i {
-			memInfo = fmt.Sprintf("[darkcyan]%.2f GB / %.2f GB[white]", gpu.MemUsedGB, state.static.GPUTotalGB[i])
+			memInfo = fmt.Sprintf("%.2f / %.2f GB", gpu.MemUsedGB, state.static.GPUTotalGB[i])
 		}
 
-		bars = append(bars, newBarData(formattedMemLabel, gpuMemPercent, memInfo))
+		bars = append(bars, newBarData(memLabel, gpuMemPercent, memInfo))
 	}
 	return bars
 }
@@ -288,19 +225,12 @@ func barsToSlices(bars []BarData) ([]string, []string, []float64) {
 }
 
 func slicesToBars(labels []string, infos []string, percentages []float64) []BarData {
-	bars := make([]BarData, 0, len(labels))
-	for i := range labels {
+	count := min(len(labels), len(infos), len(percentages))
+	bars := make([]BarData, 0, count)
+	for i := range count {
 		bars = append(bars, newBarData(labels[i], percentages[i], infos[i]))
 	}
 	return bars
-}
-
-func buildCPUSection(barWidth int, cpuLabel string, cpuInfo string, cpuUsage float64) string {
-	return cpuLabel + makeBar(cpuUsage, barWidth) + cpuInfo + "\n"
-}
-
-func buildMemorySection(barWidth int, memLabel string, memInfo string, memPercent float64) string {
-	return memLabel + makeBar(memPercent, barWidth) + memInfo + "\n"
 }
 
 func buildStorageSection(layout BarLayout, labels []string, infos []string, percentages []float64) string {
@@ -315,10 +245,6 @@ func buildGPUSection(layout BarLayout, labels []string, infos []string, percenta
 	return buildBarSection(layout, slicesToBars(labels, infos, percentages))
 }
 
-func buildGPUSectionBars(layout BarLayout, bars []BarData) string {
-	return buildBarSection(layout, bars)
-}
-
 func buildBarSection(layout BarLayout, bars []BarData) string {
 	var builder strings.Builder
 	builder.WriteString("\n")
@@ -327,98 +253,196 @@ func buildBarSection(layout BarLayout, bars []BarData) string {
 		return builder.String()
 	}
 
-	// Use the pre-calculated layout from updateResourceView
-	if layout.Columns == 1 {
-		for _, bar := range bars {
-			builder.WriteString(bar.Label + " " + makeBar(bar.Percent, layout.BarWidth) + " " + bar.Info + "\n")
-		}
-	} else {
-		barRows := makeAlignedMultiColumnBars(bars, layout)
-		for _, row := range barRows {
-			builder.WriteString(row + "\n")
-		}
+	for _, row := range makeAlignedMultiColumnBars(bars, layout) {
+		builder.WriteString(row)
+		builder.WriteByte('\n')
 	}
 
 	return builder.String()
 }
 
 func buildMetricsSection(state *State, availableWidth int) string {
-	if len(state.dynamic.NetworkUsage) == 0 &&
-		len(state.dynamic.DiskIOUsage) == 0 &&
-		state.dynamic.PIDUsage.Current == 0 &&
-		len(state.dynamic.Pressure) == 0 &&
-		len(state.dynamic.Alerts) == 0 {
+	hasActivity := hasActivityMetrics(&state.dynamic)
+	hasHistory := state.history.CPU.Next > 0 || state.history.CPU.Filled
+	if !hasActivity && !hasHistory && len(state.dynamic.Alerts) == 0 {
 		return ""
 	}
 
 	var builder strings.Builder
-	builder.WriteString("\n")
-	if len(state.dynamic.Alerts) > 0 {
-		for _, alert := range state.dynamic.Alerts {
-			builder.WriteString("[red]ALERT[white] ")
-			builder.WriteString(alert.Level)
-			builder.WriteString(": ")
-			builder.WriteString(alert.Message)
-			builder.WriteString("\n")
-		}
+	writeAlertMetrics(&builder, state.dynamic.Alerts, availableWidth)
+	if hasActivity {
+		writeActivityMetrics(&builder, state, availableWidth)
 	}
-	if pid := state.dynamic.PIDUsage; pid.Current > 0 {
-		maxText := pid.MaxText
-		if maxText == "" && pid.Max > 0 {
-			maxText = strconv.FormatUint(pid.Max, 10)
-		}
-		if maxText == "" {
-			maxText = "unknown"
-		}
-		fmt.Fprintf(&builder, "PIDS: [yellow]%d / %s[white]\n", pid.Current, maxText)
-	}
-	if len(state.dynamic.NetworkUsage) > 0 {
-		network := state.dynamic.NetworkUsage[0]
-		const networkSparklinePrefixWidth = 36
-		fmt.Fprintf(
-			&builder,
-			"NET %s: [yellow]RX %.2f MiB/s TX %.2f MiB/s[white] %s\n",
-			network.Name,
-			network.RXBytesPerSec/bytesPerSecondToMiBSecond,
-			network.TXBytesPerSec/bytesPerSecondToMiBSecond,
-			sparklineForWidth(state.history.Network, availableWidth, networkSparklinePrefixWidth),
-		)
-	}
-	if len(state.dynamic.DiskIOUsage) > 0 {
-		disk := state.dynamic.DiskIOUsage[0]
-		const diskIOSparklinePrefixWidth = 32
-		fmt.Fprintf(
-			&builder,
-			"IO %s: [yellow]R %.2f MiB/s W %.2f MiB/s[white] %s\n",
-			disk.Name,
-			disk.ReadBytesPerSec/bytesPerSecondToMiBSecond,
-			disk.WriteBytesPerSec/bytesPerSecondToMiBSecond,
-			sparklineForWidth(state.history.DiskIO, availableWidth, diskIOSparklinePrefixWidth),
-		)
-	}
-	if len(state.dynamic.Pressure) > 0 {
-		builder.WriteString("PSI:")
-		for _, pressure := range state.dynamic.Pressure {
-			fmt.Fprintf(
-				&builder,
-				" %s some %.1f full %.1f",
-				pressure.Resource,
-				pressure.SomeAvg10,
-				pressure.FullAvg10,
-			)
-		}
-		builder.WriteString("\n")
-	}
-	if state.history.CPU.Next > 0 || state.history.CPU.Filled {
-		writeHistoryLine(&builder, "CPU", state.history.CPU, availableWidth)
-		writeHistoryLine(&builder, "MEM", state.history.Memory, availableWidth)
-		writeHistoryLine(&builder, "GPU", state.history.GPU, availableWidth)
+	if hasHistory {
+		writeHistoryMetrics(&builder, state, availableWidth)
 	}
 	return builder.String()
 }
 
+func hasActivityMetrics(dynamic *DynamicInfo) bool {
+	return len(dynamic.NetworkUsage) > 0 ||
+		len(dynamic.DiskIOUsage) > 0 ||
+		dynamic.PIDUsage.Current > 0 ||
+		len(dynamic.Pressure) > 0
+}
+
+func writeAlertMetrics(builder *strings.Builder, alerts []Alert, availableWidth int) {
+	for _, alert := range alerts {
+		writeMetricLine(
+			builder,
+			"ALERT "+strings.ToUpper(alert.Level),
+			alert.Message,
+			"",
+			availableWidth,
+			"[red]",
+		)
+	}
+}
+
+func writeActivityMetrics(builder *strings.Builder, state *State, availableWidth int) {
+	writePIDMetric(builder, state.dynamic.PIDUsage, availableWidth)
+	if len(state.dynamic.NetworkUsage) > 0 {
+		network := state.dynamic.NetworkUsage[0]
+		writeMetricLine(
+			builder,
+			"NET "+network.Name,
+			throughputText(
+				"RX",
+				network.RXBytesPerSec/bytesPerSecondToMiBSecond,
+				"TX",
+				network.TXBytesPerSec/bytesPerSecondToMiBSecond,
+			),
+			sparkline(state.history.Network),
+			availableWidth,
+			themeAccentTag,
+		)
+	}
+	if len(state.dynamic.DiskIOUsage) > 0 {
+		disk := state.dynamic.DiskIOUsage[0]
+		writeMetricLine(
+			builder,
+			"IO "+disk.Name,
+			throughputText(
+				"R",
+				disk.ReadBytesPerSec/bytesPerSecondToMiBSecond,
+				"W",
+				disk.WriteBytesPerSec/bytesPerSecondToMiBSecond,
+			),
+			sparkline(state.history.DiskIO),
+			availableWidth,
+			themeAccentTag,
+		)
+	}
+	if len(state.dynamic.Pressure) > 0 {
+		writeMetricLine(
+			builder,
+			"PSI SOME/FULL",
+			pressureText(state.dynamic.Pressure),
+			"",
+			availableWidth,
+			themeAccentTag,
+		)
+	}
+}
+
+func writePIDMetric(builder *strings.Builder, pid PIDUsage, availableWidth int) {
+	if pid.Current == 0 {
+		return
+	}
+	maxText := pid.MaxText
+	if maxText == "" && pid.Max > 0 {
+		maxText = strconv.FormatUint(pid.Max, 10)
+	}
+	if maxText == "" {
+		maxText = "unknown"
+	}
+	writeMetricLine(
+		builder,
+		"PIDS",
+		fmt.Sprintf("%d / %s", pid.Current, maxText),
+		"",
+		availableWidth,
+		themeAccentTag,
+	)
+}
+
+func writeHistoryMetrics(builder *strings.Builder, state *State, availableWidth int) {
+	writeHistoryLine(builder, "HIST "+metricCPULabel, state.history.CPU, availableWidth)
+	writeHistoryLine(builder, "HIST "+metricMemoryLabel, state.history.Memory, availableWidth)
+	if state.static.GPUCount > 0 {
+		writeHistoryLine(builder, "HIST GPU", state.history.GPU, availableWidth)
+	}
+}
+
 func writeHistoryLine(builder *strings.Builder, label string, ring HistoryRing, availableWidth int) {
-	fmt.Fprintf(builder, "HIST %s %s\n", label, sparklineForWidth(ring, availableWidth, len("HIST XXX ")))
+	writeMetricLine(builder, label, "", sparkline(ring), availableWidth, themeAccentTag)
+}
+
+func writeMetricLine(
+	builder *strings.Builder,
+	label string,
+	value string,
+	trend string,
+	availableWidth int,
+	valueTag string,
+) {
+	if availableWidth <= 0 {
+		return
+	}
+	labelWidth := min(activityLabelWidth, max(0, availableWidth-metricFieldSpacing))
+	label = truncatePlainText(label, labelWidth)
+	valueWidthAvailable := max(0, availableWidth-labelWidth-metricFieldSpacing)
+	value = truncatePlainText(value, valueWidthAvailable)
+
+	trendWidth := valueWidthAvailable - visibleRuneCount(value)
+	if value != "" && trend != "" {
+		trendWidth -= metricFieldSpacing
+	}
+	if trendWidth < minSparklineWidth {
+		trend = ""
+	} else {
+		trend = trimSparkline(trend, min(historySize, trendWidth))
+	}
+
+	builder.WriteString(themeLabelTag)
+	builder.WriteString(padPlainText(label, labelWidth))
+	builder.WriteString(themeResetTag)
+	builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
+	if value != "" {
+		builder.WriteString(valueTag)
+		builder.WriteString(value)
+		builder.WriteString(themeResetTag)
+	}
+	if trend != "" {
+		if value != "" {
+			builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
+		}
+		builder.WriteString(themeAccentTag)
+		builder.WriteString(trend)
+		builder.WriteString(themeResetTag)
+	}
+	builder.WriteByte('\n')
+}
+
+func throughputText(firstLabel string, first float64, secondLabel string, second float64) string {
+	return fmt.Sprintf("%-2s %7.2f  %-2s %7.2f MiB/s", firstLabel, first, secondLabel, second)
+}
+
+func pressureText(pressure []PressureStat) string {
+	var builder strings.Builder
+	for index, stat := range pressure {
+		if index > 0 {
+			builder.WriteString("  ")
+		}
+		fmt.Fprintf(
+			&builder,
+			"%s %.1f/%.1f",
+			strings.ToUpper(stat.Resource),
+			stat.SomeAvg10,
+			stat.FullAvg10,
+		)
+	}
+	return builder.String()
 }
 
 func sparklineForWidth(ring HistoryRing, availableWidth int, prefixWidth int) string {
@@ -450,6 +474,9 @@ func trimSparkline(value string, width int) string {
 func makeAlignedMultiColumnBars(bars []BarData, layout BarLayout) []string {
 	if len(bars) == 0 {
 		return nil
+	}
+	if layout.Columns <= 0 {
+		layout.Columns = 1
 	}
 	numRows := (len(bars) + layout.Columns - 1) / layout.Columns
 
@@ -538,7 +565,7 @@ func buildAlignedRow(
 	// Calculate the width each column should occupy
 	spacingWidth := (layout.Columns - 1) * columnSpacing
 	columnWidth := (layout.TotalWidth - spacingWidth) / layout.Columns
-	spacing := strings.Repeat(" ", columnSpacing)
+	spacing := "  │  "
 
 	var builder strings.Builder
 
@@ -567,43 +594,64 @@ func buildAlignedRow(
 }
 
 func formatAlignedBar(bar BarData, barWidth int, maxLabelWidth int, maxInfoWidth int, columnWidth int) string {
-	// Pad label to consistent width for alignment
-	paddedLabel := bar.Label
-	labelPadding := maxLabelWidth - barLabelWidth(bar)
-	if labelPadding > 0 {
-		paddedLabel += strings.Repeat(" ", labelPadding)
+	label := padPlainText(truncatePlainText(bar.Label, maxLabelWidth), maxLabelWidth)
+	info := padPlainText(truncatePlainText(bar.Info, maxInfoWidth), maxInfoWidth)
+
+	var builder strings.Builder
+	builder.WriteString(themeLabelTag)
+	builder.WriteString(label)
+	builder.WriteString(themeResetTag)
+	builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
+	builder.WriteString(formatUsagePercent(bar.Percent))
+	builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
+	builder.WriteString(makeBar(bar.Percent, barWidth))
+	if maxInfoWidth > 0 {
+		builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
+		builder.WriteString(themeMutedTag)
+		builder.WriteString(info)
+		builder.WriteString(themeResetTag)
 	}
 
-	// Create the bar with consistent width
-	barContent := makeBar(bar.Percent, barWidth)
-
-	// Pad info to consistent width (if info exists)
-	if bar.Info != "" {
-		paddedInfo := bar.Info
-		infoPadding := maxInfoWidth - barInfoWidth(bar)
-		if infoPadding > 0 {
-			paddedInfo += strings.Repeat(" ", infoPadding)
-		}
-		// Complete bar: label + space + bar + space + info
-		content := paddedLabel + " " + barContent + " " + paddedInfo
-
-		// Pad the entire content to fill the column width
-		contentWidth := tview.TaggedStringWidth(content)
-		if columnWidth > contentWidth {
-			content += strings.Repeat(" ", columnWidth-contentWidth)
-		}
-		return content
-	}
-
-	// No info, just label + bar
-	content := paddedLabel + " " + barContent
-
-	// Pad to fill the column width
+	content := builder.String()
 	contentWidth := tview.TaggedStringWidth(content)
 	if columnWidth > contentWidth {
 		content += strings.Repeat(" ", columnWidth-contentWidth)
 	}
 	return content
+}
+
+func formatUsagePercent(percent float64) string {
+	value := fmt.Sprintf("%5.1f%%", min(max(percent, 0), usageDisplayMaximum))
+	if percent > usageDisplayMaximum {
+		value = " 999+%"
+	}
+	return "[" + usageColorName(percent) + "]" + value + themeResetTag
+}
+
+func truncatePlainText(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(runes[:width-1]) + "…"
+}
+
+func padPlainText(value string, width int) string {
+	padding := width - visibleRuneCount(value)
+	if padding <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", padding)
+}
+
+func visibleRuneCount(value string) int {
+	return len([]rune(value))
 }
 
 // makeBar creates a visual bar representation of a percentage.
@@ -621,16 +669,19 @@ func makeBar(percent float64, barWidth int) string {
 		filledWidth = 0
 	}
 
-	// Use characters that provide better visual separation between bars
 	var builder strings.Builder
-	builder.Grow(len("[green]") + len("[white]") + barWidth*len("▓"))
-	builder.WriteString("[green]")
+	colorName := usageColorName(percent)
+	builder.Grow(len(colorName) + 2 + len(themeTrackTag) + len(themeResetTag) + barWidth*len("━"))
+	builder.WriteByte('[')
+	builder.WriteString(colorName)
+	builder.WriteByte(']')
 	for range filledWidth {
-		builder.WriteString("▓")
+		builder.WriteString("━")
 	}
+	builder.WriteString(themeTrackTag)
 	for range barWidth - filledWidth {
-		builder.WriteString("░")
+		builder.WriteString("─")
 	}
-	builder.WriteString("[white]")
+	builder.WriteString(themeResetTag)
 	return builder.String()
 }

@@ -270,15 +270,50 @@ func TestMakeBar(t *testing.T) {
 		width    int
 		expected string
 	}{
-		{name: "Zero Percent (width 20)", percent: 0, width: 20, expected: "[green]░░░░░░░░░░░░░░░░░░░░[white]"},
-		{name: "50 Percent (width 20)", percent: 50, width: 20, expected: "[green]▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░[white]"},
-		{name: "100 Percent (width 20)", percent: 100, width: 20, expected: "[green]▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓[white]"},
-		{name: "50 Percent (width 10)", percent: 50, width: 10, expected: "[green]▓▓▓▓▓░░░░░[white]"},
-		{name: "75 Percent (width 10)", percent: 75, width: 10, expected: "[green]▓▓▓▓▓▓▓░░░[white]"},
-		{name: "Zero width", percent: 100, width: 0, expected: "[green][white]"},
-		{name: "Negative width", percent: 100, width: -5, expected: "[green][white]"},
-		{name: "Over 100 percent is capped", percent: 125, width: 10, expected: "[green]▓▓▓▓▓▓▓▓▓▓[white]"},
-		{name: "Negative percent is empty", percent: -20, width: 10, expected: "[green]░░░░░░░░░░[white]"},
+		{
+			name:     "Zero Percent (width 20)",
+			percent:  0,
+			width:    20,
+			expected: "[green][gray]────────────────────[-]",
+		},
+		{
+			name:     "50 Percent (width 20)",
+			percent:  50,
+			width:    20,
+			expected: "[green]━━━━━━━━━━[gray]──────────[-]",
+		},
+		{
+			name:     "100 Percent (width 20)",
+			percent:  100,
+			width:    20,
+			expected: "[red]━━━━━━━━━━━━━━━━━━━━[gray][-]",
+		},
+		{
+			name:     "50 Percent (width 10)",
+			percent:  50,
+			width:    10,
+			expected: "[green]━━━━━[gray]─────[-]",
+		},
+		{
+			name:     "75 Percent (width 10)",
+			percent:  75,
+			width:    10,
+			expected: "[gold]━━━━━━━[gray]───[-]",
+		},
+		{name: "Zero width", percent: 100, width: 0, expected: "[red][gray][-]"},
+		{name: "Negative width", percent: 100, width: -5, expected: "[red][gray][-]"},
+		{
+			name:     "Over 100 percent is capped",
+			percent:  125,
+			width:    10,
+			expected: "[red]━━━━━━━━━━[gray][-]",
+		},
+		{
+			name:     "Negative percent is empty",
+			percent:  -20,
+			width:    10,
+			expected: "[green][gray]──────────[-]",
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -298,11 +333,7 @@ func TestMakeBarDynamicWidth(t *testing.T) {
 		t.Run(fmt.Sprintf("Width_%d", width), func(t *testing.T) {
 			barString := makeBar(50, width) // Use 50% as a sample percentage
 
-			// Strip the color tags to measure the actual visible characters.
-			cleanString := strings.Replace(barString, "[green]", "", 1)
-			cleanString = strings.Replace(cleanString, "[white]", "", 1)
-
-			actualWidth := len([]rune(cleanString))
+			actualWidth := tview.TaggedStringWidth(barString)
 
 			if actualWidth != width {
 				t.Errorf("Bar width is incorrect. Got %d, want %d", actualWidth, width)
@@ -329,12 +360,12 @@ func TestCalculateLabelInfo(t *testing.T) {
 	}
 
 	cpuLabel, cpuInfo, cpuUsage := calculateCPULabelInfo(state)
-	if !strings.Contains(cpuLabel, "75.0") || !strings.Contains(cpuInfo, "limit: 2.00 CPUs") || cpuUsage != 75 {
+	if cpuLabel != "CPU" || cpuInfo != "2.00 CPU limit" || cpuUsage != 75 {
 		t.Fatalf("Unexpected limited CPU label/info: %q %q %.1f", cpuLabel, cpuInfo, cpuUsage)
 	}
 
 	memLabel, memInfo, memPercent := calculateMEMLabelInfo(state)
-	if !strings.Contains(memLabel, "50.0") || !strings.Contains(memInfo, "2.000 GB / 4.000 GB") || memPercent != 50 {
+	if memLabel != "MEMORY" || memInfo != "2.00 / 4.00 GB" || memPercent != 50 {
 		t.Fatalf("Unexpected limited MEM label/info: %q %q %.1f", memLabel, memInfo, memPercent)
 	}
 
@@ -342,28 +373,28 @@ func TestCalculateLabelInfo(t *testing.T) {
 	state.static.ContainerMemLimitBytes = 0
 	state.static.ContainerMemLimitGB = 0
 	cpuLabel, cpuInfo, cpuUsage = calculateCPULabelInfo(state)
-	if !strings.Contains(cpuLabel, "25.0") || !strings.Contains(cpuInfo, "no cgroup limit") || cpuUsage != 25 {
+	if cpuLabel != "CPU" || !strings.Contains(cpuInfo, "no limit") || cpuUsage != 25 {
 		t.Fatalf("Unexpected host CPU label/info: %q %q %.1f", cpuLabel, cpuInfo, cpuUsage)
 	}
 
 	memLabel, memInfo, memPercent = calculateMEMLabelInfo(state)
-	if !strings.Contains(memLabel, "50.0") || !strings.Contains(memInfo, "no cgroup limit") || memPercent != 50 {
+	if memLabel != "MEMORY" || !strings.Contains(memInfo, "no limit") || memPercent != 50 {
 		t.Fatalf("Unexpected host MEM label/info: %q %q %.1f", memLabel, memInfo, memPercent)
 	}
 }
 
 func TestCalculateBarWidth(t *testing.T) {
-	labels := []string{"CPU: [yellow]50.0%[white] ", "MEM: [yellow]10.0%[white] "}
-	infos := []string{" [darkcyan](limit: 2.00 CPUs)[white]", " [darkcyan]1 GB / 4 GB[white]"}
+	labels := []string{"CPU", "MEMORY"}
+	infos := []string{"2.00 CPU limit", "1.00 / 4.00 GB"}
 
-	width := calculateBarWidth(120, labels, infos)
+	width := calculateBarWidth(180, labels, infos)
 	if width <= minBarWidth {
 		t.Fatalf("Expected wide terminal to allow a larger bar, got %d", width)
 	}
 
 	width = calculateBarWidth(1, labels, infos)
-	if width != minBarWidth {
-		t.Fatalf("Expected narrow terminal to use min bar width %d, got %d", minBarWidth, width)
+	if width != 0 {
+		t.Fatalf("Expected narrow terminal to fit the bar to zero width, got %d", width)
 	}
 }
 
@@ -388,7 +419,7 @@ func TestStorageAndGPULabelInfo(t *testing.T) {
 	if len(labels) != 2 || len(infos) != 2 || len(percentages) != 2 {
 		t.Fatalf("Unexpected storage label slice sizes: %d %d %d", len(labels), len(infos), len(percentages))
 	}
-	if !strings.Contains(labels[0], "DISK /:") || !strings.Contains(infos[0], "10.00 GB / 100.00 GB") {
+	if labels[0] != "DISK /" || infos[0] != "10.00 / 100.00 GB" {
 		t.Fatalf("Unexpected root storage label/info: %q %q", labels[0], infos[0])
 	}
 	if !strings.Contains(labels[1], ".../for/storage") {
@@ -402,11 +433,11 @@ func TestStorageAndGPULabelInfo(t *testing.T) {
 	if len(labels) != 4 || len(infos) != 4 || len(percentages) != 4 {
 		t.Fatalf("Unexpected GPU label slice sizes: %d %d %d", len(labels), len(infos), len(percentages))
 	}
-	if !strings.Contains(labels[0], "GPU0 Util:") || percentages[0] != 80 {
+	if labels[0] != "GPU0 UTIL" || percentages[0] != 80 {
 		t.Fatalf("Unexpected GPU util label/percent: %q %.1f", labels[0], percentages[0])
 	}
-	if !strings.Contains(labels[1], "GPU0 Mem:") ||
-		!strings.Contains(infos[1], "4.00 GB / 8.00 GB") ||
+	if labels[1] != "GPU0 MEM" ||
+		infos[1] != "4.00 / 8.00 GB" ||
 		percentages[1] != 50 {
 		t.Fatalf("Unexpected GPU memory label/info/percent: %q %q %.1f", labels[1], infos[1], percentages[1])
 	}
@@ -417,14 +448,14 @@ func TestStorageAndGPULabelInfo(t *testing.T) {
 
 func TestBuildSectionsAndAlignedRows(t *testing.T) {
 	labels := []string{
-		"DISK /:        [yellow] 10.0%[white]",
-		"DISK /data:    [yellow] 50.0%[white]",
-		"DISK /logs:    [yellow] 90.0%[white]",
+		"DISK /",
+		"DISK /data",
+		"DISK /logs",
 	}
 	infos := []string{
-		"[darkcyan]10.00 GB / 100.00 GB[white]",
-		"[darkcyan]50.00 GB / 100.00 GB[white]",
-		"[darkcyan]90.00 GB / 100.00 GB[white]",
+		"10.00 / 100.00 GB",
+		"50.00 / 100.00 GB",
+		"90.00 / 100.00 GB",
 	}
 	percentages := []float64{10, 50, 90}
 	maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromSlices(labels, infos)
@@ -437,7 +468,7 @@ func TestBuildSectionsAndAlignedRows(t *testing.T) {
 	}
 
 	storageSection := buildStorageSection(layout, labels, infos, percentages)
-	if !strings.Contains(storageSection, "DISK /:") || !strings.Contains(storageSection, "DISK /logs:") {
+	if !strings.Contains(storageSection, "DISK /") || !strings.Contains(storageSection, "DISK /logs") {
 		t.Fatalf("Storage section is missing expected labels: %q", storageSection)
 	}
 
@@ -447,7 +478,7 @@ func TestBuildSectionsAndAlignedRows(t *testing.T) {
 	}
 
 	gpuSection := buildGPUSection(layout, labels[:2], infos[:2], percentages[:2])
-	if !strings.Contains(gpuSection, "DISK /:") || !strings.Contains(gpuSection, "DISK /data:") {
+	if !strings.Contains(gpuSection, "DISK /") || !strings.Contains(gpuSection, "DISK /data") {
 		t.Fatalf("GPU section builder did not render provided bars: %q", gpuSection)
 	}
 
@@ -469,15 +500,157 @@ func TestBuildSectionsAndAlignedRows(t *testing.T) {
 	}
 }
 
-func TestBuildCPUAndMemorySections(t *testing.T) {
-	cpu := buildCPUSection(5, "CPU: ", " info", 40)
-	if cpu != "CPU: [green]▓▓░░░[white] info\n" {
-		t.Fatalf("Unexpected CPU section: %q", cpu)
+func TestResourceGridResponsiveAlignment(t *testing.T) {
+	state := resourceGridTestState()
+	bars := resourceGridTestBars(state)
+
+	for _, testCase := range []struct {
+		name    string
+		width   int
+		columns int
+	}{
+		{name: "compact", width: 40, columns: 1},
+		{name: "single column", width: 118, columns: 1},
+		{name: "two column boundary", width: 119, columns: 2},
+		{name: "wide", width: 150, columns: 2},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			assertResourceGridLayout(t, state, bars, testCase.width, testCase.columns)
+		})
 	}
-	mem := buildMemorySection(5, "MEM: ", " info", 60)
-	if mem != "MEM: [green]▓▓▓░░[white] info\n" {
-		t.Fatalf("Unexpected memory section: %q", mem)
+
+	text := buildResourceText(150, state)
+	for _, color := range []string{"[green]", "[gold]", "[red]"} {
+		if !strings.Contains(text, color) {
+			t.Fatalf("Expected semantic usage color %q in %q", color, text)
+		}
 	}
+	if strings.ContainsAny(text, "▓░") {
+		t.Fatalf("Resource grid still contains visually merged block bars: %q", text)
+	}
+}
+
+func resourceGridTestBars(state *State) []BarData {
+	cpuLabel, cpuInfo, cpuUsage := calculateCPULabelInfo(state)
+	memLabel, memInfo, memUsage := calculateMEMLabelInfo(state)
+	bars := []BarData{
+		newBarData(cpuLabel, cpuUsage, cpuInfo),
+		newBarData(memLabel, memUsage, memInfo),
+	}
+	bars = append(bars, calculateStorageBars(state)...)
+	return append(bars, calculateGPUBars(state)...)
+}
+
+func assertResourceGridLayout(t *testing.T, state *State, bars []BarData, width int, columns int) {
+	t.Helper()
+	layout := calculateResourceLayout(width, bars)
+	if layout.Columns != columns {
+		t.Fatalf("Expected %d columns, got %+v", columns, layout)
+	}
+
+	text := buildResourceText(width, state)
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	expectedRows := (len(bars) + layout.Columns - 1) / layout.Columns
+	if len(lines) != expectedRows {
+		t.Fatalf("Expected %d resource rows, got %d in %q", expectedRows, len(lines), text)
+	}
+	assertResourceRowsAligned(t, lines, layout)
+}
+
+func assertResourceRowsAligned(t *testing.T, lines []string, layout BarLayout) {
+	t.Helper()
+	barStarts := make([]int, layout.Columns)
+	for index := range barStarts {
+		barStarts[index] = -1
+	}
+	for rowIndex, line := range lines {
+		assertResourceRowAligned(t, line, rowIndex, layout, barStarts)
+	}
+}
+
+func assertResourceRowAligned(t *testing.T, line string, rowIndex int, layout BarLayout, barStarts []int) {
+	t.Helper()
+	if got := tview.TaggedStringWidth(line); got != layout.TotalWidth {
+		t.Fatalf("Row %d width = %d, want %d: %q", rowIndex, got, layout.TotalWidth, line)
+	}
+	plainColumns := strings.Split(stripTviewTags(line), "  │  ")
+	if len(plainColumns) != layout.Columns {
+		t.Fatalf("Row %d has %d columns, want %d: %q", rowIndex, len(plainColumns), layout.Columns, line)
+	}
+	for columnIndex, column := range plainColumns {
+		assertBarStart(t, rowIndex, columnIndex, column, barStarts)
+	}
+}
+
+func assertBarStart(t *testing.T, rowIndex int, columnIndex int, column string, barStarts []int) {
+	t.Helper()
+	if strings.TrimSpace(column) == "" {
+		return
+	}
+	start := firstBarRune(column)
+	if start < 0 {
+		t.Fatalf("Row %d column %d has no bar: %q", rowIndex, columnIndex, column)
+	}
+	if barStarts[columnIndex] < 0 {
+		barStarts[columnIndex] = start
+		return
+	}
+	if start != barStarts[columnIndex] {
+		t.Fatalf(
+			"Column %d bar starts at %d, want %d: %q",
+			columnIndex,
+			start,
+			barStarts[columnIndex],
+			column,
+		)
+	}
+}
+
+func resourceGridTestState() *State {
+	return &State{
+		static: StaticInfo{
+			ContainerCPULimit:      4,
+			ContainerMemLimitBytes: 8 * bytesPerGB,
+			ContainerMemLimitGB:    8,
+			HostCores:              12,
+			GPUCount:               1,
+			GPUTotalGB:             []float64{16},
+		},
+		dynamic: DynamicInfo{
+			ContainerCPUUsage:  12,
+			ContainerMemUsedGB: 6,
+			StorageUsage: []StorageUsage{
+				{Path: "/", UsedGB: 95, FreeGB: 5, UsedPercent: 95},
+				{Path: "/data", UsedGB: 42, FreeGB: 58, UsedPercent: 42},
+			},
+			LiveGPUUsage: []GPUUsage{{Index: 0, Utilization: 81, MemUsedGB: 4}},
+		},
+	}
+}
+
+func stripTviewTags(value string) string {
+	var builder strings.Builder
+	inTag := false
+	for _, char := range value {
+		switch {
+		case char == '[':
+			inTag = true
+		case char == ']' && inTag:
+			inTag = false
+		case !inTag:
+			builder.WriteRune(char)
+		}
+	}
+	return builder.String()
+}
+
+func firstBarRune(value string) int {
+	for index, char := range []rune(value) {
+		if char == '━' || char == '─' {
+			return index
+		}
+	}
+	return -1
 }
 
 func TestUpdateInfoView(t *testing.T) {
@@ -485,16 +658,17 @@ func TestUpdateInfoView(t *testing.T) {
 	state := &State{ui: UIState{HideASCIIArt: true, ProcessSort: SortByCPU}}
 	height := updateInfoView(view, state)
 	text := view.GetText(false)
+	plainText := stripTviewTags(text)
 	if height <= 0 {
 		t.Fatalf("Expected positive info view height, got %d", height)
 	}
 	if strings.Contains(text, "░████") {
 		t.Fatalf("Default compact info view should not show ASCII art: %q", text)
 	}
-	if !strings.Contains(text, "top inside a container") || !strings.Contains(text, "Keys: q quit") {
+	if !strings.Contains(plainText, "top inside a container") || !strings.Contains(plainText, "Keys  q quit") {
 		t.Fatalf("Compact info view text missing expected content: %q", text)
 	}
-	if height > 5 {
+	if height > 6 {
 		t.Fatalf("Compact info view should stay short, got height %d and text %q", height, text)
 	}
 
@@ -506,6 +680,32 @@ func TestUpdateInfoView(t *testing.T) {
 	}
 	if !strings.Contains(text, "░████") || !strings.Contains(text, "Logo: a") {
 		t.Fatalf("ASCII info view did not show logo or toggle help: %q", text)
+	}
+}
+
+func TestCompactInfoTextFitsPanel(t *testing.T) {
+	text := compactInfoText(
+		UIState{
+			ProcessSort:   SortByCommand,
+			ProcessFilter: "a-very-long-process-filter",
+			SearchMode:    true,
+		},
+		[]IntegrationStatus{
+			{Name: integrationDocker, Available: true},
+			{Name: integrationKubernetes},
+			{Name: integrationNVML, Available: true},
+		},
+	)
+	for row, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		if width := tview.TaggedStringWidth(line); width > compactInfoPanelWidth {
+			t.Fatalf(
+				"Compact info row %d overflows: width=%d limit=%d text=%q",
+				row,
+				width,
+				compactInfoPanelWidth,
+				line,
+			)
+		}
 	}
 }
 
@@ -585,6 +785,145 @@ func TestCompactInfoPanelLeavesProcessTableSpace(t *testing.T) {
 	}
 }
 
+func TestDashboardLayoutAtCommonTerminalSizes(t *testing.T) {
+	for _, size := range []struct {
+		width       int
+		height      int
+		wantDivider bool
+	}{
+		{width: 100, height: 40, wantDivider: false},
+		{width: 160, height: 44, wantDivider: false},
+		{width: 200, height: 50, wantDivider: true},
+	} {
+		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
+			assertDashboardLayout(t, size.width, size.height, size.wantDivider)
+		})
+	}
+}
+
+func assertDashboardLayout(t *testing.T, width int, height int, wantDivider bool) {
+	t.Helper()
+	state := dashboardLayoutTestState()
+	resourceView, topPanel, processTable, screen := renderDashboardTestScreen(state, width, height)
+	assertDashboardPanelGeometry(t, topPanel, processTable)
+	assertResourceViewFits(t, resourceView, wantDivider)
+	assertSimulationScreenContains(t, screen, "System", "Processes", "PID", "topic top inside a container")
+}
+
+func dashboardLayoutTestState() *State {
+	state := resourceGridTestState()
+	state.ui = UIState{HideASCIIArt: true, ProcessSort: SortByCPU}
+	state.dynamic.NetworkUsage = []NetworkUsage{{Name: "eth0", RXBytesPerSec: bytesPerSecondToMiBSecond}}
+	state.dynamic.DiskIOUsage = []DiskIOUsage{{Name: "sda", WriteBytesPerSec: bytesPerSecondToMiBSecond}}
+	state.dynamic.PIDUsage = PIDUsage{Current: 8, Max: 256, MaxText: "256"}
+	state.dynamic.Pressure = []PressureStat{{Resource: "cpu", SomeAvg10: 1.2}}
+	state.dynamic.Processes = []ProcessInfo{{
+		PID:        123,
+		User:       "root",
+		CPUPercent: 12.3,
+		MemPercent: 4.5,
+		Command:    "topic",
+		GPUIndex:   -1,
+	}}
+	state.history.CPU.Add(12)
+	state.history.Memory.Add(75)
+	state.history.GPU.Add(81)
+	state.history.Network.Add(1)
+	state.history.DiskIO.Add(1)
+	return state
+}
+
+func renderDashboardTestScreen(
+	state *State,
+	width int,
+	height int,
+) (*tview.TextView, *tview.Flex, *tview.Table, tcell.SimulationScreen) {
+	resourceView := tview.NewTextView().SetDynamicColors(true).SetWrap(false)
+	infoView := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignLeft)
+	processTable := configureProcessTable(tview.NewTable())
+	topPanel := tview.NewFlex().
+		SetDirection(tview.FlexColumn).
+		AddItem(resourceView, 0, 1, false).
+		AddItem(infoView, compactInfoPanelWidth, 0, false)
+	topPanel.SetBorder(true).SetTitle(" System ")
+	mainLayout := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(topPanel, placeholderHeight, 0, false).
+		AddItem(processTable, 0, 1, true)
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	app := tview.NewApplication().SetScreen(screen).SetRoot(mainLayout, true)
+	screen.SetSize(width, height)
+	app.ForceDraw()
+
+	leftHeight := updateResourceView(resourceView, state)
+	rightHeight := updateInfoView(infoView, state)
+	topPanel.ResizeItem(infoView, currentInfoPanelWidth(state), 0)
+	mainLayout.ResizeItem(topPanel, max(leftHeight, rightHeight)+borderHeight, 0)
+	updateProcessTable(processTable, state)
+	app.ForceDraw()
+	return resourceView, topPanel, processTable, screen
+}
+
+func assertDashboardPanelGeometry(t *testing.T, topPanel *tview.Flex, processTable *tview.Table) {
+	t.Helper()
+	_, topY, _, topHeight := topPanel.GetRect()
+	_, tableY, _, tableHeight := processTable.GetRect()
+	if tableY < topY+topHeight || tableHeight < 10 {
+		t.Fatalf(
+			"Panels overlap or leave too little table space: top=%d+%d table=%d+%d",
+			topY,
+			topHeight,
+			tableY,
+			tableHeight,
+		)
+	}
+}
+
+func assertResourceViewFits(t *testing.T, resourceView *tview.TextView, wantDivider bool) {
+	t.Helper()
+	text := resourceView.GetText(false)
+	_, _, resourceWidth, _ := resourceView.GetInnerRect()
+	for row, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		if got := tview.TaggedStringWidth(line); got > resourceWidth {
+			t.Fatalf("Resource row %d overflows: width=%d available=%d text=%q", row, got, resourceWidth, line)
+		}
+	}
+	hasDivider := strings.Contains(text, "│")
+	if hasDivider != wantDivider {
+		t.Fatalf("Divider presence = %t, want %t: %q", hasDivider, wantDivider, text)
+	}
+}
+
+func assertSimulationScreenContains(t *testing.T, screen tcell.SimulationScreen, expected ...string) {
+	t.Helper()
+	screenText := strings.Join(simulationScreenRows(screen), "\n")
+	for _, value := range expected {
+		if !strings.Contains(screenText, value) {
+			t.Fatalf("Composed screen is missing %q:\n%s", value, screenText)
+		}
+	}
+}
+
+func simulationScreenRows(screen tcell.SimulationScreen) []string {
+	cells, width, height := screen.GetContents()
+	rows := make([]string, height)
+	for y := range height {
+		var builder strings.Builder
+		builder.Grow(width)
+		for x := range width {
+			cell := cells[y*width+x]
+			if len(cell.Runes) == 0 || cell.Runes[0] == 0 {
+				builder.WriteByte(' ')
+				continue
+			}
+			builder.WriteRune(cell.Runes[0])
+		}
+		rows[y] = strings.TrimRight(builder.String(), " ")
+	}
+	return rows
+}
+
 func TestUpdateProcessTable(t *testing.T) {
 	table := tview.NewTable()
 	state := &State{
@@ -619,12 +958,32 @@ func TestUpdateProcessTable(t *testing.T) {
 	if got := table.GetCell(2, 4).Text; got != "70" {
 		t.Fatalf("Expected GPU util 70, got %q", got)
 	}
+	if got := tableCellForeground(table.GetCell(0, processCPUColumn)); got != tcell.ColorAqua {
+		t.Fatalf("Expected active sort header to use the accent color, got %v", got)
+	}
+	if got := tableCellForeground(table.GetCell(0, processPIDColumn)); got != tcell.ColorLightGray {
+		t.Fatalf("Expected inactive header to use the neutral color, got %v", got)
+	}
+	if got := tableCellForeground(table.GetCell(1, processCPUColumn)); got != tcell.ColorGreen {
+		t.Fatalf("Expected normal CPU usage to be green, got %v", got)
+	}
+	if got := tableCellForeground(table.GetCell(2, processGPUColumn)); got != tcell.ColorGold {
+		t.Fatalf("Expected warning GPU usage to be gold, got %v", got)
+	}
 
 	state.dynamic.Processes = state.dynamic.Processes[:1]
 	updateProcessTable(table, state)
 	if rows := table.GetRowCount(); rows != 2 {
 		t.Fatalf("Expected stale process rows to be removed, got %d rows", rows)
 	}
+}
+
+func tableCellForeground(cell *tview.TableCell) tcell.Color {
+	if cell.Color != tcell.ColorDefault {
+		return cell.Color
+	}
+	foreground, _, _ := cell.Style.Decompose()
+	return foreground
 }
 
 func TestPrepareProcessRowsSortFilterReverse(t *testing.T) {
@@ -898,7 +1257,6 @@ func TestTUIInputCaptureDoesNotDeadlock(t *testing.T) {
 	}
 	app := tview.NewApplication()
 	screen := tcell.NewSimulationScreen("UTF-8")
-	screen.SetSize(100, 32)
 	table := tview.NewTable().
 		SetSelectable(true, false).
 		SetFixed(1, 0)
@@ -915,6 +1273,7 @@ func TestTUIInputCaptureDoesNotDeadlock(t *testing.T) {
 	table.Select(1, 0)
 	setAppInputCapture(app, state, pages, table, &MockProcessSignaler{}, render)
 	app.SetScreen(screen).SetRoot(pages, true)
+	screen.SetSize(100, 32)
 
 	done := make(chan error, 1)
 	go func() {
@@ -2025,7 +2384,7 @@ func TestMetricsHistoryAlertsAndRender(t *testing.T) {
 		},
 	}
 	text := buildMetricsSection(state, 120)
-	for _, want := range []string{"ALERT", "PIDS", "NET eth0", "IO sda", "PSI", "HIST CPU"} {
+	for _, want := range []string{"ALERT", "PIDS", "NET eth0", "IO sda", "PSI SOME/FULL", "HIST CPU"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Expected metrics section to contain %q, got %q", want, text)
 		}
@@ -2074,7 +2433,8 @@ func TestIntegrationParsingAndStatusText(t *testing.T) {
 		{Name: integrationDocker, Available: true},
 		{Name: integrationKubernetes, Detail: integrationUnavailable},
 	})
-	if !strings.Contains(text, "docker=+") || !strings.Contains(text, "kubernetes=-") {
+	plainText := stripTviewTags(text)
+	if !strings.Contains(plainText, "docker=+") || !strings.Contains(plainText, "kubernetes=-") {
 		t.Fatalf("Unexpected integration status text: %q", text)
 	}
 }
