@@ -65,6 +65,7 @@ func updateProcessTable(table *tview.Table, state *State) {
 		// PID
 		columnIdx := 0
 		setTableCell(table, r+1, columnIdx, strconv.Itoa(int(p.PID)), tcell.ColorGray, true, 0)
+		table.GetCell(r+1, processPIDColumn).SetReference(p.PID)
 		// USER
 		columnIdx++
 		setTableCell(table, r+1, columnIdx, p.User, tcell.ColorLightGray, true, 0)
@@ -150,7 +151,7 @@ func setTableCell(
 }
 
 func needsProcessTransform(ui UIState) bool {
-	return ui.ProcessFilter != "" || ui.ReverseSort || ui.ProcessSort != SortByCPU
+	return ui.TreeMode || ui.ProcessFilter != "" || ui.ReverseSort || ui.ProcessSort != SortByCPU
 }
 
 func prepareProcessRows(processes []ProcessInfo, ui UIState) []ProcessInfo {
@@ -188,15 +189,25 @@ func processMatchesFilter(process ProcessInfo, filter string) bool {
 
 func sortProcesses(processes []ProcessInfo, sortColumn ProcessSortColumn, reverse bool) {
 	sort.SliceStable(processes, func(i, j int) bool {
-		less := compareProcesses(processes[i], processes[j], sortColumn)
 		if reverse {
-			return !less
+			return compareProcesses(processes[j], processes[i], sortColumn)
 		}
-		return less
+		return compareProcesses(processes[i], processes[j], sortColumn)
 	})
 }
 
+// compareProcesses orders by the sort column, breaking ties by ascending PID.
 func compareProcesses(left ProcessInfo, right ProcessInfo, sortColumn ProcessSortColumn) bool {
+	if comparePrimary(left, right, sortColumn) {
+		return true
+	}
+	if comparePrimary(right, left, sortColumn) {
+		return false
+	}
+	return left.PID < right.PID
+}
+
+func comparePrimary(left ProcessInfo, right ProcessInfo, sortColumn ProcessSortColumn) bool {
 	switch sortColumn {
 	case SortByMemory:
 		return left.MemPercent > right.MemPercent
@@ -296,21 +307,22 @@ func processTableHeaders(ui UIState) []string {
 
 func selectedProcess(table *tview.Table, state *State) (ProcessInfo, bool) {
 	row, _ := table.GetSelection()
-	if row <= 0 {
+	if row <= 0 || row >= table.GetRowCount() {
+		return ProcessInfo{}, false
+	}
+	pid, ok := table.GetCell(row, processPIDColumn).GetReference().(int32)
+	if !ok {
 		return ProcessInfo{}, false
 	}
 
 	state.dynamic.mu.Lock()
-	processes := append([]ProcessInfo(nil), state.dynamic.Processes...)
-	ui := state.ui
-	state.dynamic.mu.Unlock()
-
-	processes = prepareProcessRows(processes, ui)
-	rowIndex := row - 1
-	if rowIndex < 0 || rowIndex >= len(processes) {
-		return ProcessInfo{}, false
+	defer state.dynamic.mu.Unlock()
+	for _, process := range state.dynamic.Processes {
+		if process.PID == pid {
+			return process, true
+		}
 	}
-	return processes[rowIndex], true
+	return ProcessInfo{}, false
 }
 
 func processDetailsText(process ProcessInfo) string {

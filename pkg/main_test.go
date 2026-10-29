@@ -1057,7 +1057,6 @@ func TestProcessDetailsText(t *testing.T) {
 
 func TestSelectedProcessUsesPreparedRows(t *testing.T) {
 	table := tview.NewTable()
-	table.Select(1, 0)
 	state := &State{
 		ui: UIState{ProcessSort: SortByMemory},
 		dynamic: DynamicInfo{
@@ -1068,6 +1067,8 @@ func TestSelectedProcessUsesPreparedRows(t *testing.T) {
 		},
 	}
 
+	updateProcessTable(table, state)
+	table.Select(1, 0)
 	process, ok := selectedProcess(table, state)
 	if !ok || process.PID != 2 {
 		t.Fatalf("Expected selected row to follow prepared sort order, got process=%+v ok=%v", process, ok)
