@@ -45,6 +45,7 @@ const (
 	activityLabelWidth        = 14                // Shared label gutter for activity and history rows
 	commandTimeout            = 2 * time.Second   // Maximum time allowed for external probes
 	cgroupMaxToken            = "max"             // Cgroup token for unlimited resources
+	cgroupV1UnlimitedMemory   = 1 << 62           // Cgroup v1 memory limits at or above this are unlimited
 	cgroupCPUMaxPath          = "/sys/fs/cgroup/cpu.max"
 	cgroupCPUStatPath         = "/sys/fs/cgroup/cpu.stat"
 	cgroupV1CPUQuotaPath      = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"

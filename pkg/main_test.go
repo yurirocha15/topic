@@ -1648,13 +1648,13 @@ func TestUpdateContainerCPUUsage(t *testing.T) {
 			expectedPercent: 25.0,
 		},
 		{
-			name:          "CgroupV2 usage exceeds 100% and is capped",
+			name:          "CgroupV2 first sample without baseline reports zero",
 			cgroupVersion: CgroupV2,
 			cpuLimit:      1.0, // 1 core
 			prevUsage:     0,
-			// CORRECTED: The mock file content must match what the parser expects.
-			mockFiles:       map[string]string{"/sys/fs/cgroup/cpu.stat": "usage_usec 1200000"}, // 1.2 seconds of usage
-			expectedPercent: 100.0,                                                              // Should be capped to 100
+			// A first sample must not treat the cumulative counter as a delta.
+			mockFiles:       map[string]string{"/sys/fs/cgroup/cpu.stat": "usage_usec 1200000"},
+			expectedPercent: 0.0,
 		},
 		{
 			name:            "No change in usage",

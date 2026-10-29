@@ -87,37 +87,48 @@ func getContainerMemLimit(cgroupVersion CgroupVersion, fs FileReader) (int64, fl
 	if limitBytes <= 0 {
 		return 0, 0
 	}
+	if cgroupVersion == CgroupV1 && limitBytes >= cgroupV1UnlimitedMemory {
+		return 0, 0
+	}
 	return limitBytes, float64(limitBytes) / float64(bytesPerGB)
 }
 
-// updateContainerCPUUsage reads the CPU usage from the cgroup filesystem.
-func updateContainerCPUUsage(state *State, fs FileReader) float64 {
-	var currentUsage uint64
-
-	if state.static.CgroupVersion == CgroupV2 {
+// readContainerCPUUsage reads the cumulative container CPU usage in microseconds.
+// The boolean is false when the counter could not be read or parsed.
+func readContainerCPUUsage(cgroupVersion CgroupVersion, fs FileReader) (uint64, bool) {
+	if cgroupVersion == CgroupV2 {
 		statStr, err := readStringFromFile(cgroupCPUStatPath, fs)
 		if err != nil {
-			return 0
+			return 0, false
 		}
 		for _, line := range strings.Split(statStr, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) == 2 && parts[0] == "usage_usec" {
-				currentUsage, err = strconv.ParseUint(parts[1], 10, 64)
-				if err != nil {
-					return 0
-				}
-				break
+				usage, parseErr := strconv.ParseUint(parts[1], 10, 64)
+				return usage, parseErr == nil
 			}
 		}
-	} else { // CgroupV1
-		// value is in nanoseconds, convert to microseconds
-		ns, err := readUintFromFile(cgroupV1CPUUsagePath, fs)
-		if err == nil {
-			currentUsage = ns / nanosecondsToMicroseconds
-		}
+		return 0, false
+	}
+	// CgroupV1: value is in nanoseconds, convert to microseconds
+	ns, err := readUintFromFile(cgroupV1CPUUsagePath, fs)
+	return ns / nanosecondsToMicroseconds, err == nil
+}
+
+// updateContainerCPUUsage reads the CPU usage from the cgroup filesystem.
+func updateContainerCPUUsage(state *State, fs FileReader) float64 {
+	currentUsage, ok := readContainerCPUUsage(state.static.CgroupVersion, fs)
+	if !ok {
+		return 0
 	}
 
 	now := time.Now()
+	// Without a baseline, or if the counter went backwards, rebaseline instead of reporting a delta.
+	if state.prevCPUUsage == 0 || currentUsage < state.prevCPUUsage {
+		state.prevCPUUsage = currentUsage
+		state.prevCPUTime = now
+		return 0
+	}
 	timeDelta := now.Sub(state.prevCPUTime).Seconds()
 
 	var cpuPercent float64
