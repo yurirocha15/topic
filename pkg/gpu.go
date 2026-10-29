@@ -11,17 +11,20 @@ func getStaticGPUInfo(runner CommandRunner) (int, []float64, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	linesMem := strings.Split(strings.TrimSpace(string(outMem)), "\n")
-	if len(linesMem) == 0 || linesMem[0] == "" {
-		return 0, nil, nil
-	}
-	totals := make([]float64, 0, len(linesMem))
-	for _, line := range linesMem {
-		mb, parseErr := strconv.ParseFloat(strings.TrimSpace(line), 64)
-		if parseErr != nil {
+	var totals []float64
+	for _, line := range strings.Split(string(outMem), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
+		mb, parseErr := strconv.ParseFloat(line, 64)
+		if parseErr != nil {
+			mb = 0 // unknown total; keep the slot so later GPUs stay aligned
+		}
 		totals = append(totals, mb/bytesPerKB) // Convert MB to GB
+	}
+	if len(totals) == 0 {
+		return 0, nil, nil
 	}
 	return len(totals), totals, nil
 }

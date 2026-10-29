@@ -1827,7 +1827,7 @@ func TestGetStaticGPUInfo(t *testing.T) {
 	}
 }
 
-func TestGetStaticGPUInfoSkipsMalformedRows(t *testing.T) {
+func TestGetStaticGPUInfoKeepsSlotForMalformedRows(t *testing.T) {
 	mockRunner := MockCommandRunner{
 		outputs: map[string]string{
 			"nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits": "8192\nnot-a-number\n16384\n",
@@ -1838,11 +1838,11 @@ func TestGetStaticGPUInfoSkipsMalformedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("Expected GPU count of 2, got %d", count)
+	if count != 3 {
+		t.Fatalf("Expected GPU count of 3, got %d", count)
 	}
-	if len(totals) != 2 || totals[0] != 8.0 || totals[1] != 16.0 {
-		t.Fatalf("Expected valid totals [8 16], got %v", totals)
+	if len(totals) != 3 || totals[0] != 8.0 || totals[1] != 0 || totals[2] != 16.0 {
+		t.Fatalf("Expected totals [8 0 16], got %v", totals)
 	}
 }
 

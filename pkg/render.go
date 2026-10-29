@@ -191,21 +191,23 @@ func calculateGPULabelsInfo(state *State) ([]string, []string, []float64) {
 
 func calculateGPUBars(state *State) []BarData {
 	bars := make([]BarData, 0, len(state.dynamic.LiveGPUUsage)*barsPerGPU)
-	for i, gpu := range state.dynamic.LiveGPUUsage {
-		utilLabel := fmt.Sprintf("GPU%d UTIL", i)
+	for _, gpu := range state.dynamic.LiveGPUUsage {
+		utilLabel := fmt.Sprintf("GPU%d UTIL", gpu.Index)
 		bars = append(bars, newBarData(utilLabel, float64(gpu.Utilization), ""))
 
-		// GPU Memory - Format as: "GPU0 Mem:" with right-aligned percentage
+		// GPU memory: percent and used/total info need a known total for this index
 		gpuMemPercent := 0.0
-		if len(state.static.GPUTotalGB) > i && state.static.GPUTotalGB[i] > 0 {
-			gpuMemPercent = (gpu.MemUsedGB / state.static.GPUTotalGB[i]) * percentMultiplier
+		memInfo := ""
+		if gpu.Index >= 0 && gpu.Index < len(state.static.GPUTotalGB) {
+			total := state.static.GPUTotalGB[gpu.Index]
+			if total > 0 {
+				gpuMemPercent = (gpu.MemUsedGB / total) * percentMultiplier
+				memInfo = fmt.Sprintf("%.2f / %.2f GB", gpu.MemUsedGB, total)
+			} else {
+				memInfo = fmt.Sprintf("%.2f GB", gpu.MemUsedGB)
+			}
 		}
-		memLabel := fmt.Sprintf("GPU%d MEM", i)
-
-		var memInfo string
-		if len(state.static.GPUTotalGB) > i {
-			memInfo = fmt.Sprintf("%.2f / %.2f GB", gpu.MemUsedGB, state.static.GPUTotalGB[i])
-		}
+		memLabel := fmt.Sprintf("GPU%d MEM", gpu.Index)
 
 		bars = append(bars, newBarData(memLabel, gpuMemPercent, memInfo))
 	}
