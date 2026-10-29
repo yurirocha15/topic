@@ -117,18 +117,34 @@ func containerIDFromCgroup(fs FileReader) string {
 	if err != nil {
 		return ""
 	}
-	for _, field := range strings.FieldsFunc(content, func(r rune) bool {
+	for _, segment := range strings.FieldsFunc(content, func(r rune) bool {
 		return r == '/' || r == ':' || r == '\n'
 	}) {
-		field = strings.TrimSpace(field)
-		if len(field) >= containerIDMinLength && isContainerID(field) {
-			if len(field) > containerIDFullLength {
-				field = field[len(field)-containerIDFullLength:]
-			}
-			return field
+		if id := containerIDFromCgroupSegment(segment); id != "" {
+			return id
 		}
 	}
 	return ""
+}
+
+func containerIDFromCgroupSegment(segment string) string {
+	if isFullContainerID(segment) {
+		return segment
+	}
+	scoped, ok := strings.CutSuffix(segment, ".scope")
+	if !ok {
+		return ""
+	}
+	for _, prefix := range []string{"docker-", "cri-containerd-", "crio-", "libpod-"} {
+		if id, found := strings.CutPrefix(scoped, prefix); found && isFullContainerID(id) {
+			return id
+		}
+	}
+	return ""
+}
+
+func isFullContainerID(value string) bool {
+	return len(value) == containerIDFullLength && isContainerID(value)
 }
 
 func containerIDFromHostname(hostname string) string {
