@@ -54,10 +54,22 @@ func shouldSkipFilesystem(fstype, mountpoint string) bool {
 		"/dev", "/sys", mountProcPath, "/run", mountTmpPath, "/var/run", "/var/lock",
 	}
 
+	// Match on path-segment boundaries so /developer is not mistaken for /dev
+	normalized := mountpoint
+	if len(normalized) > 1 {
+		normalized = strings.TrimRight(normalized, "/")
+	}
+
 	for _, skip := range skipPaths {
-		if strings.HasPrefix(mountpoint, skip) {
+		if normalized == skip || strings.HasPrefix(normalized, skip+"/") {
 			return true
 		}
+	}
+
+	// Skip single files bind-mounted by Docker and Kubernetes
+	switch normalized {
+	case "/etc/hosts", "/etc/hostname", "/etc/resolv.conf":
+		return true
 	}
 
 	// Skip loop devices (often used by snap packages and other virtual filesystems)
