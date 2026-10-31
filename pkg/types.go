@@ -293,6 +293,8 @@ type State struct {
 	prevNetTime  time.Time
 	prevDiskTime time.Time
 
+	processCPU processCPUTracker
+
 	prevCgroupEvents *CgroupEvents
 	lastOOMKillTime  time.Time
 	lastThrottleTime time.Time

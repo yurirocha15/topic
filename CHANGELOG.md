@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - OOM and CPU throttling alerts now appear when the counters increase and clear after 30 seconds, instead of staying on for the life of the container.
 - Warning alerts use the gold warning color instead of red.
 - Metric history no longer crashes on a negative value.
+- Process `%CPU` shows current usage instead of a lifetime average, and a reused PID no longer inherits the old process's numbers.
+- Process `%MEM` uses host memory when the container has no memory limit, instead of showing 0.
 
 ## [0.0.3] - 2026-10-31
 

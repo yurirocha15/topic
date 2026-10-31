@@ -448,12 +448,50 @@ func previousProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
 	}
 }
 
-// updateProcessList fetches the current process list and adds resource usage info when possible.
-func updateProcessList(static *StaticInfo, runner CommandRunner) []ProcessInfo {
-	return updateProcessListWithProvider(static, runner, OSProcessProvider{})
+// processKey identifies a process across refreshes, because PIDs can be reused.
+type processKey struct {
+	pid        int32
+	createTime int64
 }
 
-func updateProcessListWithProvider(static *StaticInfo, runner CommandRunner, provider ProcessProvider) []ProcessInfo {
+// processCPUTracker turns cumulative process CPU time into usage since the previous refresh.
+type processCPUTracker struct {
+	samples   map[processKey]float64
+	sampledAt time.Time
+}
+
+// percent records a process's CPU time in next and returns its usage, where 100 is one full core.
+// It returns 0 until the process has a previous sample to compare against.
+func (t *processCPUTracker) percent(p ProcessHandle, next map[processKey]float64, now time.Time) (float64, error) {
+	times, err := p.Times()
+	if err != nil {
+		return 0, fmt.Errorf("cpu times: %w", err)
+	}
+	createTime, err := p.CreateTime()
+	if err != nil {
+		return 0, fmt.Errorf("create time: %w", err)
+	}
+
+	key := processKey{pid: p.PID(), createTime: createTime}
+	seconds := times.User + times.System
+	next[key] = seconds
+
+	previous, ok := t.samples[key]
+	elapsed := now.Sub(t.sampledAt).Seconds()
+	if !ok || elapsed <= 0 || seconds <= previous {
+		return 0, nil
+	}
+	return (seconds - previous) / elapsed * percentMultiplier, nil
+}
+
+// updateProcessListWithProvider fetches the process list and adds resource usage info when possible.
+func updateProcessListWithProvider(
+	static *StaticInfo,
+	runner CommandRunner,
+	provider ProcessProvider,
+	tracker *processCPUTracker,
+	now time.Time,
+) []ProcessInfo {
 	var gpuProcessMap map[int32]GPUProcessInfo
 	if static.GPUCount > 0 {
 		gpuProcessMap = getGPUProcessMap(runner)
@@ -463,15 +501,26 @@ func updateProcessListWithProvider(static *StaticInfo, runner CommandRunner, pro
 		return nil
 	}
 	processList := make([]ProcessInfo, 0, len(procs))
+	samples := make(map[processKey]float64, len(procs))
 	for _, p := range procs {
-		pi, processErr := getProcessInfo(p, static, gpuProcessMap)
+		cpuPercent, cpuErr := tracker.percent(p, samples, now)
+		if cpuErr != nil {
+			continue
+		}
+		pi, processErr := getProcessInfo(p, static, gpuProcessMap, cpuPercent)
 		if processErr != nil {
 			continue
 		}
 		processList = append(processList, pi)
 	}
+	tracker.samples = samples
+	tracker.sampledAt = now
+
 	sort.Slice(processList, func(i, j int) bool {
-		return processList[i].rawCPU > processList[j].rawCPU
+		if processList[i].rawCPU != processList[j].rawCPU {
+			return processList[i].rawCPU > processList[j].rawCPU
+		}
+		return processList[i].PID < processList[j].PID
 	})
 	return processList
 }
@@ -493,9 +542,13 @@ func computeContainerPercents(cpuPercent float64, rssBytes uint64, static *Stati
 	if static.ContainerCPULimit > 0 {
 		cpu = cpuPercent / static.ContainerCPULimit
 	}
+	memTotal := float64(static.ContainerMemLimitBytes)
+	if memTotal <= 0 {
+		memTotal = static.HostMemTotalGB * bytesPerGB
+	}
 	mem := 0.0
-	if static.ContainerMemLimitBytes > 0 {
-		mem = (float64(rssBytes) / float64(static.ContainerMemLimitBytes)) * percentMultiplier
+	if memTotal > 0 {
+		mem = (float64(rssBytes) / memTotal) * percentMultiplier
 	}
 	return cpu, mem
 }
@@ -504,11 +557,8 @@ func getProcessInfo(
 	p ProcessHandle,
 	static *StaticInfo,
 	gpuProcessMap map[int32]GPUProcessInfo,
+	cpuPercent float64,
 ) (ProcessInfo, error) {
-	cpuPercent, err := p.CPUPercent()
-	if err != nil {
-		return ProcessInfo{}, fmt.Errorf("cpu percent: %w", err)
-	}
 	memInfo, err := p.MemoryInfo()
 	if err != nil {
 		return ProcessInfo{}, fmt.Errorf("memory info: %w", err)

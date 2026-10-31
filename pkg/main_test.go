@@ -13,6 +13,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 	netio "github.com/shirou/gopsutil/v3/net"
@@ -95,17 +96,18 @@ func (mpp MockProcessProvider) Processes() ([]ProcessHandle, error) {
 }
 
 type MockProcessHandle struct {
-	pid        int32
-	ppid       int32
-	cpuPercent float64
-	rss        uint64
-	user       string
-	cmdline    string
-	name       string
-	createTime int64
-	threads    int32
-	openFiles  int
-	err        error
+	pid          int32
+	ppid         int32
+	cpuSeconds   float64
+	timesMissing bool
+	rss          uint64
+	user         string
+	cmdline      string
+	name         string
+	createTime   int64
+	threads      int32
+	openFiles    int
+	err          error
 }
 
 func (mph MockProcessHandle) PID() int32 {
@@ -116,8 +118,14 @@ func (mph MockProcessHandle) ParentPID() (int32, error) {
 	return mph.ppid, mph.err
 }
 
-func (mph MockProcessHandle) CPUPercent() (float64, error) {
-	return mph.cpuPercent, mph.err
+func (mph MockProcessHandle) Times() (*cpu.TimesStat, error) {
+	if mph.err != nil {
+		return nil, mph.err
+	}
+	if mph.timesMissing {
+		return nil, errors.New("missing times")
+	}
+	return &cpu.TimesStat{User: mph.cpuSeconds}, nil
 }
 
 func (mph MockProcessHandle) MemoryInfo() (*process.MemoryInfoStat, error) {
@@ -1380,28 +1388,33 @@ func TestUpdateProcessListWithProvider(t *testing.T) {
 			"nvidia-smi pmon -c 1 -s um": "0 1002 C 70 40 - - python",
 		},
 	}
-	provider := MockProcessProvider{
-		processes: []ProcessHandle{
-			MockProcessHandle{pid: 1001, cpuPercent: 10, rss: bytesPerGB, cmdline: "", name: "worker"},
-			MockProcessHandle{
-				pid:        1002,
-				cpuPercent: 80,
-				rss:        2 * bytesPerGB,
-				user:       "alice",
-				cmdline:    "python train.py",
+	provider := func(workerSeconds, trainSeconds float64) MockProcessProvider {
+		return MockProcessProvider{
+			processes: []ProcessHandle{
+				MockProcessHandle{pid: 1001, cpuSeconds: workerSeconds, rss: bytesPerGB, cmdline: "", name: "worker"},
+				MockProcessHandle{
+					pid:        1002,
+					cpuSeconds: trainSeconds,
+					rss:        2 * bytesPerGB,
+					user:       "alice",
+					cmdline:    "python train.py",
+				},
+				MockProcessHandle{pid: 1003, err: errors.New("skip")},
 			},
-			MockProcessHandle{pid: 1003, err: errors.New("skip")},
-		},
+		}
 	}
 
-	processes := updateProcessListWithProvider(staticInfo, runner, provider)
+	tracker := &processCPUTracker{}
+	start := time.Now()
+	updateProcessListWithProvider(staticInfo, runner, provider(0, 0), tracker, start)
+	processes := updateProcessListWithProvider(staticInfo, runner, provider(0.5, 1), tracker, start.Add(time.Second))
 	if len(processes) != 2 {
 		t.Fatalf("Expected 2 valid processes, got %d", len(processes))
 	}
 	if processes[0].PID != 1002 || processes[1].PID != 1001 {
 		t.Fatalf("Expected processes sorted by raw CPU, got %+v", processes)
 	}
-	if processes[0].CPUPercent != 40 || processes[0].MemPercent != 50 {
+	if processes[0].CPUPercent != 50 || processes[0].MemPercent != 50 {
 		t.Fatalf("Unexpected container percentages for GPU process: %+v", processes[0])
 	}
 	if processes[0].GPUIndex != 0 || processes[0].GPUUtil != 70 || processes[0].GPUMemPercent != 40 {
@@ -1417,6 +1430,8 @@ func TestUpdateProcessListWithProviderError(t *testing.T) {
 		&StaticInfo{},
 		MockCommandRunner{},
 		MockProcessProvider{err: errors.New("process failure")},
+		&processCPUTracker{},
+		time.Now(),
 	)
 	if processes != nil {
 		t.Fatalf("Expected nil process list on provider error, got %+v", processes)
@@ -1919,7 +1934,7 @@ func TestUpdateProcessListSkipsGPUProbeWhenNoGPU(t *testing.T) {
 	runner := &CountingCommandRunner{}
 	staticInfo := &StaticInfo{GPUCount: 0}
 
-	_ = updateProcessList(staticInfo, runner)
+	_ = updateProcessListWithProvider(staticInfo, runner, OSProcessProvider{}, &processCPUTracker{}, time.Now())
 	if runner.calls != 0 {
 		t.Fatalf("Expected no GPU probe calls, got %d", runner.calls)
 	}
@@ -2061,7 +2076,13 @@ func TestUpdateProcessList(t *testing.T) {
 		GPUTotalGB:             []float64{16.0},
 	}
 
-	processList := updateProcessList(staticInfo, mockRunner)
+	processList := updateProcessListWithProvider(
+		staticInfo,
+		mockRunner,
+		OSProcessProvider{},
+		&processCPUTracker{},
+		time.Now(),
+	)
 
 	foundTestProcess := false
 	for _, p := range processList {

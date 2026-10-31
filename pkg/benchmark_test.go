@@ -100,9 +100,10 @@ func BenchmarkUpdateProcessListWithProvider(b *testing.B) {
 	}
 	provider := MockProcessProvider{processes: benchmarkProcessHandles(500)}
 	runner := MockCommandRunner{}
+	tracker := &processCPUTracker{}
 
 	for range b.N {
-		_ = updateProcessListWithProvider(staticInfo, runner, provider)
+		_ = updateProcessListWithProvider(staticInfo, runner, provider, tracker, time.Now())
 	}
 }
 
@@ -214,7 +215,7 @@ func benchmarkProcessHandles(count int) []ProcessHandle {
 	for i := range count {
 		processes = append(processes, MockProcessHandle{
 			pid:        int32(1000 + i),
-			cpuPercent: float64((count - i) % 100),
+			cpuSeconds: float64((count - i) % 100),
 			rss:        uint64((i%8)+1) * bytesPerGB / 2,
 			user:       "worker",
 			cmdline:    "python train.py --batch-size 32 --worker",

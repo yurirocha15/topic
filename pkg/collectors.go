@@ -113,7 +113,7 @@ func newDynamicCollectorSet(
 			return updatePressure(fs)
 		},
 		Processes: func() []ProcessInfo {
-			return updateProcessListWithProvider(&staticInfo, runner, processProvider)
+			return updateProcessListWithProvider(&staticInfo, runner, processProvider, &state.processCPU, time.Now())
 		},
 	}
 

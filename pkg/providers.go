@@ -65,7 +65,7 @@ func (s OSStater) Stat(path string) (os.FileInfo, error) {
 type ProcessHandle interface {
 	PID() int32
 	ParentPID() (int32, error)
-	CPUPercent() (float64, error)
+	Times() (*cpu.TimesStat, error)
 	MemoryInfo() (*process.MemoryInfoStat, error)
 	Username() (string, error)
 	Cmdline() (string, error)
