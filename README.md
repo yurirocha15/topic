@@ -111,7 +111,7 @@ topic --version          # print the version and exit
 
 If you prefer to build the project yourself, you will need:
 
-* Go (version 1.23 or later)
+* Go (version 1.26 or later)
 * `make`
 
 Clone the repository and run the build command:

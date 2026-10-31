@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/rivo/tview"
-	"github.com/shirou/gopsutil/v3/disk"
-	netio "github.com/shirou/gopsutil/v3/net"
+	"github.com/shirou/gopsutil/v4/disk"
+	netio "github.com/shirou/gopsutil/v4/net"
 )
 
 func BenchmarkMakeBar(b *testing.B) {

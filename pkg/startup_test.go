@@ -12,8 +12,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/shirou/gopsutil/v3/mem"
-	netio "github.com/shirou/gopsutil/v3/net"
+	"github.com/shirou/gopsutil/v4/mem"
+	netio "github.com/shirou/gopsutil/v4/net"
 )
 
 func TestParseConfigArgsDefaults(t *testing.T) {
