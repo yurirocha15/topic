@@ -2,11 +2,18 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
+	"os/signal"
+	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -16,6 +23,15 @@ import (
 // --- Constants ---
 
 const (
+	exitOK      = 0 // Successful run
+	exitFailure = 1 // Runtime failure
+	exitUsage   = 2 // Invalid command-line arguments, matching the flag package
+
+	defaultVersion     = "dev"     // Version of a binary built without release ldflags
+	develModuleVersion = "(devel)" // Build info version of a local build
+
+	onceSampleWindow = 250 * time.Millisecond // Time between the readings of a one-shot snapshot
+
 	compactInfoPanelWidth     = 48                // Fixed compact width of the information panel
 	asciiInfoPanelWidth       = 55                // Fixed width needed for the ASCII art panel
 	placeholderHeight         = 10                // Initial height of the top panel
@@ -81,10 +97,28 @@ const (
 	metricMemoryLabel         = "MEMORY"
 )
 
+// Version is set at build time with -ldflags "-X main.Version=vX.Y.Z".
+var Version = defaultVersion //nolint:gochecknoglobals // -ldflags -X needs a package variable
+
 // --- Main Application ---
 
 func main() {
-	config := parseConfig()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run executes the program and returns its exit code.
+func run(args []string, stdout, stderr io.Writer) int {
+	config, err := parseConfigArgs(args, stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		return exitOK
+	}
+	if err != nil {
+		return exitUsage
+	}
+	if config.ShowVersion {
+		fmt.Fprintf(stdout, "topic %s\n", versionString())
+		return exitOK
+	}
 
 	fileReader := OSFileReader{}
 	cmdRunner := OSCommandRunner{Timeout: commandTimeout}
@@ -106,23 +140,56 @@ func main() {
 		ui:          UIState{ProcessSort: config.InitialSort, HideASCIIArt: config.HideASCIIArt},
 		prevCPUTime: time.Now(),
 	}
-
-	if config.Once {
+	refresh := func() {
 		refreshDynamicState(state, fileReader, cmdRunner)
-		if config.JSONOutput {
-			if err = writeJSONSnapshot(os.Stdout, state); err != nil {
-				log.Fatalf("Could not write JSON snapshot: %v", err)
-			}
-			return
-		}
-		if _, err = os.Stdout.WriteString(onceText(state)); err != nil {
-			log.Fatalf("Could not write snapshot: %v", err)
-		}
-		return
 	}
 
-	app := tview.NewApplication()
+	if config.Once {
+		sampleOnce(refresh, time.Sleep)
+		if err = writeOnceSnapshot(stdout, config, state); err != nil {
+			fmt.Fprintf(stderr, "Could not write snapshot: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+	if err = runTUI(ctx, tview.NewApplication(), config, state, refresh); err != nil {
+		fmt.Fprintf(stderr, "Could not start application: %v\n", err)
+		return exitFailure
+	}
+	return exitOK
+}
+
+// versionString returns the injected version, or the module version for `go install` builds.
+func versionString() string {
+	if Version != defaultVersion {
+		return Version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != develModuleVersion {
+		return info.Main.Version
+	}
+	return Version
+}
+
+// sampleOnce refreshes twice because CPU, network, and disk rates need two readings.
+func sampleOnce(refresh func(), wait func(time.Duration)) {
+	refresh()
+	wait(onceSampleWindow)
+	refresh()
+}
+
+func writeOnceSnapshot(stdout io.Writer, config AppConfig, state *State) error {
+	if config.JSONOutput {
+		return writeJSONSnapshot(stdout, state)
+	}
+	_, err := io.WriteString(stdout, onceText(state))
+	return err
+}
+
+// runTUI shows the dashboard until the user quits or ctx is cancelled.
+func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state *State, refresh func()) error {
 	// --- Create UI Components ---
 
 	// Left panel for resources
@@ -164,28 +231,39 @@ func main() {
 		updateProcessTable(processTable, state)
 	}
 
+	setAppInputCapture(app, state, pages, processTable, OSProcessSignaler{}, render)
+
+	// Initial data load and draw, finished before the ticker can start another refresh
+	refresh()
+	render()
+
+	// QueueUpdate waits for the event loop, so a signal during startup still stops the app
+	stopWatching := context.AfterFunc(ctx, func() {
+		app.QueueUpdate(app.Stop)
+	})
+	defer stopWatching()
+
+	tickerCtx, stopTicker := context.WithCancel(ctx)
+	defer stopTicker()
+
 	// --- Goroutine for periodic updates ---
 	go func() {
 		ticker := time.NewTicker(config.RefreshInterval)
 		defer ticker.Stop()
 		for {
-			<-ticker.C
+			select {
+			case <-tickerCtx.Done():
+				return
+			case <-ticker.C:
+			}
 			if !isPaused(state) {
-				refreshDynamicState(state, fileReader, cmdRunner)
+				refresh()
 			}
 			app.QueueUpdateDraw(render)
 		}
 	}()
 
-	setAppInputCapture(app, state, pages, processTable, OSProcessSignaler{}, render)
-
-	// Initial data load and draw
-	refreshDynamicState(state, fileReader, cmdRunner)
-	render()
-
-	if err = app.SetRoot(pages, true).Run(); err != nil {
-		log.Fatalf("Could not start application: %v", err)
-	}
+	return app.SetRoot(pages, true).Run()
 }
 
 func configureProcessTable(table *tview.Table) *tview.Table {

@@ -38,6 +38,7 @@ type AppConfig struct {
 	JSONOutput        bool
 	HideASCIIArt      bool
 	InitialSort       ProcessSortColumn
+	ShowVersion       bool
 }
 
 type ContainerMetadata struct {

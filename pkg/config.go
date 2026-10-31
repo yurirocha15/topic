@@ -1,23 +1,40 @@
 package main
 
 import (
+	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"strings"
 	"time"
 )
 
-func parseConfig() AppConfig {
-	refresh := flag.Duration("refresh", time.Second, "refresh interval")
-	noGPU := flag.Bool("no-gpu", false, "disable GPU collection")
-	noDocker := flag.Bool("no-docker", false, "disable Docker metadata integration")
-	noKubernetes := flag.Bool("no-kubernetes", false, "disable Kubernetes metadata integration")
-	noNVML := flag.Bool("no-nvml", false, "disable NVML GPU integration")
-	once := flag.Bool("once", false, "collect one snapshot and exit")
-	jsonOutput := flag.Bool("json", false, "print a JSON snapshot; implies --once")
-	showASCII := flag.Bool("ascii", false, "show the ASCII art panel at startup")
-	hideASCII := flag.Bool("no-ascii", false, "hide the ASCII art panel")
-	sortColumn := flag.String("sort", "cpu", "initial process sort: cpu, mem, gpu, gpumem, pid, user, command")
-	flag.Parse()
+// parseConfigArgs parses command-line arguments and reports any problem to output.
+func parseConfigArgs(args []string, output io.Writer) (AppConfig, error) {
+	flags := flag.NewFlagSet("topic", flag.ContinueOnError)
+	flags.SetOutput(output)
+	refresh := flags.Duration("refresh", time.Second, "refresh interval")
+	noGPU := flags.Bool("no-gpu", false, "disable GPU collection")
+	noDocker := flags.Bool("no-docker", false, "disable Docker metadata integration")
+	noKubernetes := flags.Bool("no-kubernetes", false, "disable Kubernetes metadata integration")
+	noNVML := flags.Bool("no-nvml", false, "disable NVML GPU integration")
+	once := flags.Bool("once", false, "collect one snapshot and exit")
+	jsonOutput := flags.Bool("json", false, "print a JSON snapshot; implies --once")
+	showASCII := flags.Bool("ascii", false, "show the ASCII art panel at startup")
+	hideASCII := flags.Bool("no-ascii", false, "hide the ASCII art panel")
+	sortColumn := flags.String("sort", "cpu", "initial process sort: cpu, mem, gpu, gpumem, pid, user, command")
+	showVersion := flags.Bool("version", false, "print the version and exit")
+	if err := flags.Parse(args); err != nil {
+		return AppConfig{}, err
+	}
+
+	// time.NewTicker panics on a non-positive interval
+	if *refresh <= 0 {
+		err := errors.New("--refresh must be greater than 0")
+		fmt.Fprintln(output, err)
+		flags.Usage()
+		return AppConfig{}, err
+	}
 
 	return AppConfig{
 		RefreshInterval:   *refresh,
@@ -29,7 +46,8 @@ func parseConfig() AppConfig {
 		JSONOutput:        *jsonOutput,
 		HideASCIIArt:      !*showASCII || *hideASCII,
 		InitialSort:       parseProcessSortColumn(*sortColumn),
-	}
+		ShowVersion:       *showVersion,
+	}, nil
 }
 
 func parseProcessSortColumn(value string) ProcessSortColumn {
