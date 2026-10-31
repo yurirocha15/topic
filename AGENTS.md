@@ -17,7 +17,8 @@
 - `make e2e-docker` validates Docker metadata from inside a real Docker container.
 - `make e2e-kubernetes` validates Kubernetes metadata from inside a real cluster pod.
 - Direct test loop: `cd pkg && go test ./...`.
-- Race check: `cd pkg && go test -race ./...`.
+- Race check: `make test-race` or `cd pkg && go test -race ./...`.
+- `make format-check` fails on unformatted code without rewriting files. `make vuln` runs `govulncheck`.
 - TUI regression check: `cd pkg && go test -run 'Test(ResourceGridResponsiveAlignment|DashboardLayoutAtCommonTerminalSizes|CompactInfoPanelLeavesProcessTableSpace|TUIInputCaptureDoesNotDeadlock)' -count=1 ./...`.
 - Baseline benchmarks: `cd pkg && go test -bench=. -benchmem -count=5 ./...`.
 - Live integration discovery is opt-in: `TOPIC_LIVE_INTEGRATION_TESTS=1 make test-integrations`.

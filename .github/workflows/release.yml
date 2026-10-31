@@ -133,5 +133,10 @@ jobs:
           SHA: ${{ needs.prepare.outputs.sha }}
         run: |
           scripts/release-notes.sh "$TAG" > release-notes.md
+
+          mkdir release
+          cp artifacts/*/* release/
+          (cd release && sha256sum topic-* > SHA256SUMS)
+
           # Creates the tag for manual runs. Tags made with GITHUB_TOKEN do not start this workflow again.
-          gh release create "$TAG" artifacts/*/* --target "$SHA" --title "$TAG" --notes-file release-notes.md
+          gh release create "$TAG" release/* --target "$SHA" --title "$TAG" --notes-file release-notes.md

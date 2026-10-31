@@ -8,6 +8,7 @@ GOTEST=go test
 GOMOD=go mod
 GORUN=go run
 GOVET=go vet
+GOVULNCHECK=golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
 # Project variables
 BINARY_NAME=topic
@@ -32,11 +33,15 @@ run:
 clean:
 	@echo "Cleaning up..."
 	@rm -rf $(OUTPUT_DIR)
-	$(GOCLEAN)
+	(cd $(MODULE_PATH) && $(GOCLEAN))
 
 test:
 	@echo "Running tests..."
 	(cd $(MODULE_PATH) && $(GOTEST) -coverprofile=coverage.out ./...)
+
+test-race:
+	@echo "Running tests with the race detector..."
+	(cd $(MODULE_PATH) && $(GOTEST) -race ./...)
 
 test-integrations:
 	@echo "Running integration discovery tests..."
@@ -74,17 +79,25 @@ view-coverage:
 deps:
 	@echo "Tidying dependencies..."
 	(cd $(MODULE_PATH) && $(GOMOD) tidy)
-	(cd $(MODULE_PATH) && $(GOMOD) vendor)
 
 format:
 	@echo "Formatting code..."
 	(cd $(MODULE_PATH) && $(GOFMT) -s -w ./)
 
+format-check:
+	@echo "Checking formatting..."
+	@unformatted="$$(cd $(MODULE_PATH) && $(GOFMT) -s -l ./)"; \
+	if [ -n "$$unformatted" ]; then echo "Run make format for:"; echo "$$unformatted"; exit 1; fi
+
+vuln:
+	@echo "Checking for known vulnerabilities..."
+	(cd $(MODULE_PATH) && $(GOCMD) run $(GOVULNCHECK) ./...)
+
 lint:
 	@echo "Linting code..."
 	(cd $(MODULE_PATH) && $(GOLINT))
 
-ci-check: format lint test test-release-notes
+ci-check: format-check lint test test-release-notes
 	@echo "CI checks passed."
 
 help:
@@ -95,6 +108,7 @@ help:
 	@echo "  build    Build the application binary"
 	@echo "  run      Run the application"
 	@echo "  test     Run all tests"
+	@echo "  test-race Run all tests with the race detector"
 	@echo "  test-integrations Run fake integration tests and JSON smoke validation"
 	@echo "  test-release-notes Test the changelog extraction used for releases"
 	@echo "  e2e-docker Run Docker environment integration validation"
@@ -103,9 +117,12 @@ help:
 	@echo "  bench    Run benchmarks"
 	@echo "  bench-save Run benchmarks and save output in tmp/benchmarks"
 	@echo "  lint     Lint the source code"
-	@echo "  deps     Tidy and vendor dependencies"
+	@echo "  format   Format the source code"
+	@echo "  format-check Fail if the source code is not formatted"
+	@echo "  vuln     Check dependencies and the Go toolchain for known vulnerabilities"
+	@echo "  deps     Tidy dependencies"
 	@echo "  clean    Remove build artifacts"
 	@echo "  help     Show this help message"
 	@echo ""
 
-.PHONY: all build run clean test test-integrations test-release-notes e2e-docker e2e-kubernetes e2e-integrations bench bench-save deps lint help
+.PHONY: build run clean test test-race test-integrations test-release-notes e2e-docker e2e-kubernetes e2e-integrations bench bench-save view-coverage deps format format-check vuln lint ci-check help

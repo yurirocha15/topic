@@ -10,25 +10,47 @@ on:
     branches:
       - 'main'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-test:
     name: Lint and Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: 'pkg/go.mod'
-          cache: true
+          cache-dependency-path: 'pkg/go.sum'
 
-      - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v8
+      - name: Check formatting
+        run: make format-check
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.3
+          version: v2.15.0
           working-directory: ./pkg
 
-      - name: Run all checks via Makefile
-        run: make ci-check
+      - name: Run tests
+        run: make test
+
+      - name: Run race tests
+        run: make test-race
+
+      - name: Run integration tests
+        run: make test-integrations
+
+      - name: Run release notes tests
+        run: make test-release-notes
+
+      - name: Check for known vulnerabilities
+        run: make vuln
