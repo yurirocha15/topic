@@ -78,6 +78,21 @@ info "Found download URL: $DOWNLOAD_URL"
 info "Downloading binary..."
 TMP_FILE=$(mktemp)
 http_get "$DOWNLOAD_URL" > "$TMP_FILE"
+
+# Releases before v0.0.4 have no SHA256SUMS file.
+ASSET_NAME="${DOWNLOAD_URL##*/}"
+EXPECTED_SUM=$(http_get "${DOWNLOAD_URL%/*}/SHA256SUMS" | awk -v name="$ASSET_NAME" '$2 == name { print $1 }')
+if [ -z "$EXPECTED_SUM" ]; then
+    warn "This release has no checksum for $ASSET_NAME. Skipping verification."
+elif ! command -v sha256sum >/dev/null 2>&1; then
+    warn "sha256sum is not installed. Skipping checksum verification."
+elif [ "$(sha256sum "$TMP_FILE" | cut -d ' ' -f 1)" != "$EXPECTED_SUM" ]; then
+    rm -f "$TMP_FILE"
+    error "Checksum verification failed for $ASSET_NAME."
+else
+    info "Checksum verified."
+fi
+
 chmod +x "$TMP_FILE"
 
 # 4. Determine install location and install.
