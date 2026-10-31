@@ -24,6 +24,7 @@ const (
 	resourceIO                = "io"
 	alertWarning              = "warning"
 	alertCritical             = "critical"
+	cgroupEventAlertHold      = 30 * time.Second
 )
 
 func updateNetworkUsageWithProvider(state *State, provider NetworkProvider) []NetworkUsage {
@@ -239,12 +240,6 @@ func evaluateAlerts(staticInfo StaticInfo, dynamic DynamicSnapshot) []Alert {
 	case memPercent >= alertMemoryWarnPercent:
 		alerts = append(alerts, Alert{Level: alertWarning, Message: "container memory is above 85%"})
 	}
-	if dynamic.CgroupEvents.MemoryOOMKill > 0 {
-		alerts = append(alerts, Alert{Level: alertCritical, Message: "cgroup reports OOM kills"})
-	}
-	if dynamic.CgroupEvents.CPUThrottledPeriods > 0 {
-		alerts = append(alerts, Alert{Level: alertWarning, Message: "cgroup reports CPU throttling"})
-	}
 	if dynamic.PIDUsage.Max > 0 {
 		pidPercent := (float64(dynamic.PIDUsage.Current) / float64(dynamic.PIDUsage.Max)) * percentMultiplier
 		if pidPercent >= alertPIDWarnPercent {
@@ -258,6 +253,30 @@ func evaluateAlerts(staticInfo StaticInfo, dynamic DynamicSnapshot) []Alert {
 				Message: pressure.Resource + " pressure avg10 is elevated",
 			})
 		}
+	}
+	return alerts
+}
+
+// cgroupEventAlerts reports OOM kills and throttling that grew recently. The counters are cumulative
+// over the container's life, so only an increase is news. Alerts stay visible for cgroupEventAlertHold
+// because one refresh is too short to notice.
+func cgroupEventAlerts(state *State, events CgroupEvents, now time.Time) []Alert {
+	if state.prevCgroupEvents != nil {
+		if events.MemoryOOMKill > state.prevCgroupEvents.MemoryOOMKill {
+			state.lastOOMKillTime = now
+		}
+		if events.CPUThrottledPeriods > state.prevCgroupEvents.CPUThrottledPeriods {
+			state.lastThrottleTime = now
+		}
+	}
+	state.prevCgroupEvents = &events
+
+	var alerts []Alert
+	if !state.lastOOMKillTime.IsZero() && now.Sub(state.lastOOMKillTime) < cgroupEventAlertHold {
+		alerts = append(alerts, Alert{Level: alertCritical, Message: "cgroup reports OOM kills"})
+	}
+	if !state.lastThrottleTime.IsZero() && now.Sub(state.lastThrottleTime) < cgroupEventAlertHold {
+		alerts = append(alerts, Alert{Level: alertWarning, Message: "cgroup reports CPU throttling"})
 	}
 	return alerts
 }
@@ -322,7 +341,7 @@ func sparkline(ring HistoryRing) string {
 	}
 	var builder strings.Builder
 	for _, value := range values {
-		index := int((value / maxValue) * float64(len([]rune(blocks))-1))
+		index := max(int((value/maxValue)*float64(len([]rune(blocks))-1)), 0)
 		builder.WriteRune([]rune(blocks)[index])
 	}
 	return builder.String()

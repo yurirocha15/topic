@@ -290,13 +290,17 @@ func hasActivityMetrics(dynamic *DynamicInfo) bool {
 
 func writeAlertMetrics(builder *strings.Builder, alerts []Alert, availableWidth int) {
 	for _, alert := range alerts {
+		colorTag := "[red]"
+		if alert.Level == alertWarning {
+			colorTag = themeAttentionTag
+		}
 		writeMetricLine(
 			builder,
 			"ALERT "+strings.ToUpper(alert.Level),
 			alert.Message,
 			"",
 			availableWidth,
-			"[red]",
+			colorTag,
 		)
 	}
 }

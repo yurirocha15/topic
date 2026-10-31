@@ -59,7 +59,10 @@ func refreshDynamicStateWithProviders(
 		networkProvider,
 		diskIOProvider,
 	))
-	dynamic.Alerts = evaluateAlerts(staticInfo, dynamic)
+	dynamic.Alerts = append(
+		evaluateAlerts(staticInfo, dynamic),
+		cgroupEventAlerts(state, dynamic.CgroupEvents, time.Now())...,
+	)
 
 	state.dynamic.mu.Lock()
 	updateMetricsHistory(&state.history, staticInfo, dynamic)

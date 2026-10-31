@@ -292,7 +292,12 @@ type State struct {
 	prevDiskIO   map[string]DiskIOCounter
 	prevNetTime  time.Time
 	prevDiskTime time.Time
-	history      MetricsHistory
+
+	prevCgroupEvents *CgroupEvents
+	lastOOMKillTime  time.Time
+	lastThrottleTime time.Time
+
+	history MetricsHistory
 }
 
 // Static returns a copy of the static configuration.

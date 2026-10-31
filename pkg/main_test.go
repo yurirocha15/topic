@@ -2370,7 +2370,7 @@ func TestMetricsHistoryAlertsAndRender(t *testing.T) {
 		Pressure:     []PressureStat{{Resource: "cpu", SomeAvg10: 12}},
 	}
 	alerts := evaluateAlerts(staticInfo, dynamic)
-	if len(alerts) < 4 {
+	if len(alerts) < 3 {
 		t.Fatalf("Expected multiple alerts, got %+v", alerts)
 	}
 

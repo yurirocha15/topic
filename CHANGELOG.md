@@ -23,6 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `--refresh` values of 0 or less are rejected with an error instead of crashing at startup.
 - The first dashboard refresh can no longer overlap with the periodic refresh.
 - Release binaries now report their release version.
+- OOM and CPU throttling alerts now appear when the counters increase and clear after 30 seconds, instead of staying on for the life of the container.
+- Warning alerts use the gold warning color instead of red.
+- Metric history no longer crashes on a negative value.
 
 ## [0.0.3] - 2026-10-31
 
