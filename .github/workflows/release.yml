@@ -2,15 +2,74 @@
 
 name: Build and Release
 
-# This workflow runs when a new Release is created
+# Runs when a vX.Y.Z tag is pushed, or manually with a branch and a new vX.Y.Z tag.
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to release from'
+        required: true
+        default: 'main'
+        type: string
+      version:
+        description: 'Version tag to create (vX.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version || github.ref_name }}
 
 jobs:
+  # Stops the release early if the version is invalid or the code is not releasable.
+  prepare:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch && format('refs/heads/{0}', inputs.branch) || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'pkg/go.mod'
+          cache-dependency-path: 'pkg/go.sum'
+
+      - name: Resolve version
+        id: version
+        env:
+          TAG: ${{ inputs.version || github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # Validates the tag format and that the changelog has notes for this version.
+          scripts/release-notes.sh "$TAG" > /dev/null
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "::error::Tag $TAG already exists."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        working-directory: ./pkg
+        run: go test ./...
+
+  # Builds the binary for each architecture.
   build:
     name: Build for Linux (${{ matrix.arch }})
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -18,55 +77,61 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.24'
+          go-version-file: 'pkg/go.mod'
+          cache-dependency-path: 'pkg/go.sum'
 
       - name: Build static binary
+        working-directory: ./pkg
         env:
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
           # IMPORTANT: Create a static binary for maximum compatibility (e.g., running on Alpine images).
           CGO_ENABLED: 0
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          # Define the output binary name.
-          BINARY_NAME="topic-${{ env.GOOS }}-${{ env.GOARCH }}"
-          
-          # Build the Go application.
           # -ldflags="-s -w" strips the binary to make it smaller.
           # -X main.Version=... injects the Git tag as a version string.
-          (cd ./pkg && go build -v -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o ../${BINARY_NAME} .)
+          go build -v -ldflags="-s -w -X main.Version=${TAG}" -o "../topic-${GOOS}-${GOARCH}" .
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: topic-linux-${{ matrix.arch }}
           path: topic-linux-${{ matrix.arch }}
 
-  # Gather the built artifacts and attaches them to the GitHub Release.
+  # Gathers the built artifacts and publishes them with the changelog notes.
   release:
     name: Create GitHub Release
-    # It only runs if the trigger was a release creation event.
-    if: github.event_name == 'release'
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           # The destination path for the downloaded artifacts.
           path: artifacts
 
-      - name: Upload assets to release
-        uses: softprops/action-gh-release@v2
-        with:
-          # Attach all files from the 'artifacts' directory subfolders to the release.
-          files: artifacts/*/*
+      - name: Create release
         env:
           # The GITHUB_TOKEN is automatically provided by GitHub Actions.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          scripts/release-notes.sh "$TAG" > release-notes.md
+          # Creates the tag for manual runs. Tags made with GITHUB_TOKEN do not start this workflow again.
+          gh release create "$TAG" artifacts/*/* --target "$SHA" --title "$TAG" --notes-file release-notes.md

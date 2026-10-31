@@ -13,6 +13,7 @@
 - `make lint` runs `golangci-lint run` from `pkg/`.
 - `make build` builds `dist/topic`.
 - `make test-integrations` runs deterministic fake integration tests plus a `--once --json` integration-status smoke check.
+- `make test-release-notes` tests the changelog extraction used by the release workflow.
 - `make e2e-docker` validates Docker metadata from inside a real Docker container.
 - `make e2e-kubernetes` validates Kubernetes metadata from inside a real cluster pod.
 - Direct test loop: `cd pkg && go test ./...`.
@@ -38,3 +39,4 @@
 - Use the shared semantic palette for usage values: green below 70%, gold from 70% to 89.9%, and red at 90% or above.
 - When changing the composed TUI, validate both tcell simulation sizes and a real pseudo-terminal interaction flow. Update `static/img/topic.png` when the README screenshot becomes materially stale.
 - Preserve the TUI behavior unless a task explicitly asks for a visual/layout change.
+- Add user-facing changes to the `[Unreleased]` section of `CHANGELOG.md`. A release fails unless its version has a section with entries.

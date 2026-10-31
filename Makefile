@@ -43,6 +43,10 @@ test-integrations:
 	(cd $(MODULE_PATH) && $(GOTEST) -run 'Test(Discover.*Integration|DiscoverDocker|DiscoverKubernetes|DiscoverNVML|IntegrationParsing|LiveIntegration|WriteJSONSnapshot)' ./...)
 	@./scripts/smoke-integration.sh
 
+test-release-notes:
+	@echo "Running release notes tests..."
+	@./scripts/test-release-notes.sh
+
 e2e-docker:
 	@echo "Running Docker E2E integration validation..."
 	@./scripts/e2e-docker-integration.sh
@@ -80,7 +84,7 @@ lint:
 	@echo "Linting code..."
 	(cd $(MODULE_PATH) && $(GOLINT))
 
-ci-check: format lint test
+ci-check: format lint test test-release-notes
 	@echo "CI checks passed."
 
 help:
@@ -92,6 +96,7 @@ help:
 	@echo "  run      Run the application"
 	@echo "  test     Run all tests"
 	@echo "  test-integrations Run fake integration tests and JSON smoke validation"
+	@echo "  test-release-notes Test the changelog extraction used for releases"
 	@echo "  e2e-docker Run Docker environment integration validation"
 	@echo "  e2e-kubernetes Run Kubernetes environment integration validation"
 	@echo "  e2e-integrations Run all real environment integration validation"
@@ -103,4 +108,4 @@ help:
 	@echo "  help     Show this help message"
 	@echo ""
 
-.PHONY: all build run clean test test-integrations e2e-docker e2e-kubernetes e2e-integrations bench bench-save deps lint help
+.PHONY: all build run clean test test-integrations test-release-notes e2e-docker e2e-kubernetes e2e-integrations bench bench-save deps lint help

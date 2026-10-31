@@ -86,9 +86,10 @@ topic --ascii            # start with the large ASCII logo visible
 topic --once             # print one text snapshot and exit
 topic --once --json      # print one JSON snapshot for scripts
 topic --sort=mem         # initial sort: cpu, mem, gpu, gpumem, pid, user, command
+topic --version          # print the version and exit
 ```
 
-`--once` and `--json` take a single sample, so container CPU usage reads 0 when the container has a CPU limit. Use the interactive view for live container CPU.
+`--once` and `--json` take two readings 250 ms apart, so CPU, network, and disk rates are measured over that window.
 
 #### Controls
 
@@ -185,6 +186,27 @@ TOPIC_LIVE_INTEGRATION_TESTS=1 make test-integrations
 ```
 
 Live tests assert that discovery returns well-formed statuses without hanging or crashing. They do not require every integration to be available; unavailable Docker, Kubernetes, or NVIDIA/NVML environments are valid results. Use the E2E targets above when you need to prove an integration is available and returning correct metadata in its native environment.
+
+---
+
+### Releasing
+
+Add user-facing changes to the `[Unreleased]` section of [CHANGELOG.md](./CHANGELOG.md) as they land. To cut a release:
+
+1. Rename `[Unreleased]` to the new version with the release date, for example `## [0.0.4] - 2026-11-01`.
+2. Add a new empty `[Unreleased]` section above it, update the compare links at the bottom of the file, and merge the change.
+3. Start the release in one of two ways:
+
+   ```bash
+   # Run the workflow on a branch. It creates the tag once the build passes.
+   gh workflow run release.yml -f branch=main -f version=v0.0.4
+
+   # Or push a tag yourself.
+   git tag -s v0.0.4 -m v0.0.4
+   git push origin v0.0.4
+   ```
+
+The workflow checks the version format, requires changelog entries for that version, runs the tests, builds the amd64 and arm64 binaries, and publishes a GitHub release with that changelog section as its notes. Preview the notes with `scripts/release-notes.sh v0.0.4`.
 
 ---
 
