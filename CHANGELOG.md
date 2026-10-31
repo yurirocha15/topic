@@ -11,14 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - `--version` prints the version of the binary.
+- Releases include a `SHA256SUMS` file and signed build provenance, so downloads can be verified.
 
 ### Changed
 
-- Releases are built from a pushed `vX.Y.Z` tag or a manual workflow run given a version tag, and must come from `main`.
-- Release notes come from the matching section of this changelog.
-- Releases include a `SHA256SUMS` file and signed build provenance attestations.
 - Building from source now requires Go 1.26.
-- Updated to gopsutil v4, tview v0.42, and tcell v2.13.
 - Container memory now reports the working set on cgroup v1 and v2. Cgroup v2 previously counted only anonymous memory, and cgroup v1 included reclaimable cache.
 
 ### Security
@@ -33,11 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `--once` and `--json` now measure container CPU, network, and disk rates over a 250 ms window instead of reporting 0.
 - SIGTERM, SIGHUP, and SIGINT now restore the terminal before `topic` exits.
 - `--refresh` values of 0 or less are rejected with an error instead of crashing at startup.
-- The first dashboard refresh can no longer overlap with the periodic refresh.
-- Release binaries now report their release version.
 - OOM and CPU throttling alerts now appear when the counters increase and clear after 30 seconds, instead of staying on for the life of the container.
 - Warning alerts use the gold warning color instead of red.
-- Metric history no longer crashes on a negative value.
 - Process `%CPU` shows current usage instead of a lifetime average, and a reused PID no longer inherits the old process's numbers.
 - Process `%MEM` uses host memory when the container has no memory limit, instead of showing 0.
 - `--once` text output no longer contains display markup such as `[white]`.
@@ -55,7 +49,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `--once` and `--json` for one-shot text and JSON snapshots.
 - Docker, Kubernetes, and NVIDIA/NVML integration status, with `--no-docker`, `--no-kubernetes`, and `--no-nvml` to disable each one.
 - `--refresh`, `--sort`, `--no-gpu`, `--ascii`, and `--no-ascii` options.
-- Deterministic integration tests and Docker and Kubernetes E2E validation targets.
 - MIT license.
 
 ### Changed

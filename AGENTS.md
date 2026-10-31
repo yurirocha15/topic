@@ -13,7 +13,7 @@
 - `make lint` runs `golangci-lint run` from `pkg/`.
 - `make build` builds `dist/topic`.
 - `make test-integrations` runs deterministic fake integration tests plus a `--once --json` integration-status smoke check.
-- `make test-release-notes` tests the changelog extraction used by the release workflow.
+- `make test-release-notes` tests the changelog extraction.
 - `make e2e-docker` validates Docker metadata from inside a real Docker container.
 - `make e2e-kubernetes` validates Kubernetes metadata from inside a real cluster pod.
 - Direct test loop: `cd pkg && go test ./...`.
@@ -41,4 +41,5 @@
 - When changing the composed TUI, validate both tcell simulation sizes and a real pseudo-terminal interaction flow. Update `static/img/topic.png` when the README screenshot becomes materially stale.
 - Text from processes, mounts, interfaces, or user input is untrusted. Pass it through `escapeText` or `displayText` after truncating and measuring it, at the point it reaches a tagged tview sink. `tview.Escape` is not enough because it leaves URL tags active.
 - Preserve the TUI behavior unless a task explicitly asks for a visual/layout change.
-- Add user-facing changes to the `[Unreleased]` section of `CHANGELOG.md`. A release fails unless its version has a section with entries.
+- Keep `README.md` for people using `topic`. Testing and other developer documentation belongs in `CONTRIBUTING.md`. Do not document the release process in the repository.
+- Add user-facing changes to the `[Unreleased]` section of `CHANGELOG.md`. Write each entry for someone using `topic`: leave out CI, release process, test, refactoring, and dependency changes unless they affect users.

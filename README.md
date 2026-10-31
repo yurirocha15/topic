@@ -130,96 +130,11 @@ make build
 
 The compiled binary will be available at `./dist/topic`.
 
-### Testing
-
-Run the standard validation gates from the repository root:
-
-```bash
-make test
-make lint
-make build
-```
-
-Race detection and benchmarks run directly from the Go module:
-
-```bash
-cd pkg
-go test -race ./...
-go test -bench=. -benchmem -count=5 ./...
-```
-
-The test suite includes simulated TUI renders at compact, medium, and wide terminal sizes, plus input-flow coverage for filtering, sorting, process details, and clean shutdown.
-
-### Testing Integrations
-
-The normal test suite uses fake Docker, Kubernetes, and NVML providers so it does not require host services:
-
-```bash
-make test-integrations
-```
-
-This target also runs `scripts/smoke-integration.sh`, which executes `topic --once --json` and validates that Docker, Kubernetes, and NVML integration statuses are present in the JSON snapshot.
-
-To validate that integrations work inside real environments, use the opt-in E2E targets:
-
-```bash
-make e2e-docker
-make e2e-kubernetes
-make e2e-integrations   # runs both
-```
-
-`make e2e-docker` requires Docker and `/var/run/docker.sock`. It builds a local image, runs `topic --once --json` inside Docker with the Docker socket mounted, and asserts Docker metadata is actually available.
-
-`make e2e-kubernetes` requires `kubectl` connected to a cluster. By default it builds a local Docker image named `topic:e2e-kubernetes`; if your cluster cannot see local Docker images, publish an image yourself and run:
-
-```bash
-TOPIC_KUBE_E2E_BUILD_IMAGE=0 TOPIC_KUBE_E2E_IMAGE=registry.example.com/topic:e2e make e2e-kubernetes
-```
-
-For kind clusters, the script automatically loads the local image when the current context starts with `kind-`.
-
-For k3s clusters, the script can import the local image only when it is run as root or passwordless `sudo` is available. Otherwise, publish the image to a registry or manually import it into k3s/containerd before running the target.
-
-For single-node local clusters where the Kubernetes node can access this checkout path, you can avoid image publishing by mounting the built binary into a stock Alpine pod:
-
-```bash
-TOPIC_KUBE_E2E_USE_HOSTPATH=1 make e2e-kubernetes
-```
-
-Live integration discovery is opt-in:
-
-```bash
-TOPIC_LIVE_INTEGRATION_TESTS=1 make test-integrations
-```
-
-Live tests assert that discovery returns well-formed statuses without hanging or crashing. They do not require every integration to be available; unavailable Docker, Kubernetes, or NVIDIA/NVML environments are valid results. Use the E2E targets above when you need to prove an integration is available and returning correct metadata in its native environment.
-
----
-
-### Releasing
-
-Add user-facing changes to the `[Unreleased]` section of [CHANGELOG.md](./CHANGELOG.md) as they land. To cut a release:
-
-1. Rename `[Unreleased]` to the new version with the release date, for example `## [0.0.4] - 2026-11-01`.
-2. Add a new empty `[Unreleased]` section above it, update the compare links at the bottom of the file, and merge the change.
-3. Start the release from `main` in one of two ways:
-
-   ```bash
-   # Run the workflow. It creates the tag once the build passes.
-   gh workflow run release.yml -f version=v0.0.4
-
-   # Or push a tag yourself. The tagged commit must be on main.
-   git tag -s v0.0.4 -m v0.0.4
-   git push origin v0.0.4
-   ```
-
-The workflow checks the version format, requires the commit to be on `main` and the version to have changelog entries, runs the tests, builds the amd64 and arm64 binaries, attests their build provenance, and publishes a GitHub release with that changelog section as its notes. Preview the notes with `scripts/release-notes.sh v0.0.4`.
-
 ---
 
 ### Contributing
 
-Contributions are welcome! If you find a bug or have a feature request, please open an issue on the [GitHub Issues](https://github.com/yurirocha15/topic/issues) page.
+Contributions are welcome! If you find a bug or have a feature request, please open an issue on the [GitHub Issues](https://github.com/yurirocha15/topic/issues) page. See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to test the project.
 
 ---
 
