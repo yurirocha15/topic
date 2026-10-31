@@ -38,6 +38,14 @@ The system panel adapts to the terminal width. Wide terminals use two aligned re
 - Utilization is green below 70%, gold from 70% to 89.9%, and red at 90% or above.
 - Docker, Kubernetes, and NVIDIA/NVML availability is shown in the compact status panel. Missing integrations remain non-fatal.
 
+### How Metrics Are Measured
+
+- **CPU:** when the cgroup sets a CPU limit that differs from the host core count, usage is a percentage of that limit. Otherwise `topic` shows host CPU usage. Container CPU is calculated from the change between two readings, so the first refresh shows 0%.
+- **Memory:** usage is a percentage of the cgroup memory limit. With no limit (`max` on cgroup v2, or the near-maximum value cgroup v1 uses for "unlimited"), `topic` shows host memory instead.
+- **Storage:** virtual filesystems, system mounts such as `/dev`, `/proc`, `/run`, and `/tmp`, and the files Docker and Kubernetes bind-mount at `/etc/hosts`, `/etc/hostname`, and `/etc/resolv.conf` are hidden. Mount paths are compared by whole path segment, so a disk mounted at `/developer` stays visible.
+- **GPU:** GPUs are labelled by their `nvidia-smi` index. If a GPU does not report its total memory, its memory row shows the amount used at 0%.
+- **Docker and Kubernetes:** container IDs are read from the cgroup paths used by cgroupfs and systemd drivers, including `docker-<id>.scope`, `cri-containerd-<id>.scope`, `crio-<id>.scope`, and `libpod-<id>.scope`.
+
 ---
 
 ### Installation
@@ -45,13 +53,13 @@ The system panel adapts to the terminal width. Wide terminals use two aligned re
 You can install the latest version of `topic` with a single command. The script will automatically detect your system's architecture (amd64/arm64) and install the binary to a directory in your `PATH`.
 
 ```bash
-curl -s https://raw.githubusercontent.com/yurirocha15/topic/master/install.sh | bash
+curl -s https://raw.githubusercontent.com/yurirocha15/topic/main/install.sh | bash
 ```
 
 or for containers based on `alpine`:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/yurirocha15/topic/master/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/yurirocha15/topic/main/install.sh | sh
 ```
 
 The script will attempt to install to `/usr/local/bin` (prompting for `sudo` if needed). If that fails, it will fall back to `$HOME/.local/bin` and notify you if you need to add this directory to your `PATH`.
@@ -80,6 +88,8 @@ topic --once --json      # print one JSON snapshot for scripts
 topic --sort=mem         # initial sort: cpu, mem, gpu, gpumem, pid, user, command
 ```
 
+`--once` and `--json` take a single sample, so container CPU usage reads 0 when the container has a CPU limit. Use the interactive view for live container CPU.
+
 #### Controls
 
 * **Quit:** `q` or `Ctrl+C`
@@ -87,9 +97,9 @@ topic --sort=mem         # initial sort: cpu, mem, gpu, gpumem, pid, user, comma
 * **Filter mode:** `/` to enter, type to filter, `Ctrl+U` to clear, `Esc` to leave.
 * **Sort mode:** `s` to enter, `←`/`→` to choose a column, `↑`/`↓` to choose direction, `Esc` to leave.
 * **Process details:** `Enter`
-* **Signal process:** `k`
+* **Signal process:** `k` (`Enter` and `k` act on the PID shown in the highlighted row)
 * **Pause refresh:** `p`
-* **Tree view:** `t`
+* **Tree view:** `t` (shows process tree order instead of the selected sort)
 * **Toggle logo:** `a`
 * **Help:** `?`
 

@@ -24,10 +24,16 @@
 ## Implementation Notes
 
 - Keep cgroup parsing tolerant: missing or malformed files should degrade to empty/zero usage instead of crashing.
+- Treat cgroup v1 memory limits at or above `1<<62` as unlimited.
+- Container CPU usage needs a baseline: the first sample reports 0, a failed counter read keeps the existing baseline, and a counter that goes backwards rebaselines.
+- Compare storage skip paths on path-segment boundaries, not raw prefixes.
+- Accept container IDs from cgroup paths only when they are exactly 64 lowercase hex characters.
 - Treat missing GPU tooling as a normal no-GPU environment. Tests and benchmarks should mock `nvidia-smi`.
+- Keep one `GPUTotalGB` slot per reported GPU, using 0 for unparsable totals, and look totals up by GPU index, not list position.
 - Docker, Kubernetes, and NVML integrations must remain optional. Test unavailable, disabled, partial, and success states with fake hooks; keep live integration tests skipped unless explicitly enabled.
 - Use the E2E targets for native-environment validation; `make test-integrations` only proves deterministic behavior and JSON status shape.
 - Avoid long work while holding the dynamic state mutex; collect values first, then publish a snapshot.
+- Process table rows carry their PID as a cell reference. Resolve selection from that PID, not the row index, because the snapshot can change between drawing and a keypress.
 - Keep resource rows on the shared label/percentage/bar/detail grid. At wide widths the two columns must retain a visible divider; narrow layouts must not overflow.
 - Use the shared semantic palette for usage values: green below 70%, gold from 70% to 89.9%, and red at 90% or above.
 - When changing the composed TUI, validate both tcell simulation sizes and a real pseudo-terminal interaction flow. Update `static/img/topic.png` when the README screenshot becomes materially stale.
