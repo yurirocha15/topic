@@ -95,7 +95,7 @@ vuln:
 
 lint:
 	@echo "Linting code..."
-	(cd $(MODULE_PATH) && $(GOLINT))
+	(cd $(MODULE_PATH) && golangci-lint config verify && $(GOLINT))
 
 ci-check: format-check lint test test-release-notes
 	@echo "CI checks passed."
