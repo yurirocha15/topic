@@ -65,6 +65,12 @@ wget -qO- https://raw.githubusercontent.com/yurirocha15/topic/main/install.sh | 
 
 The script will attempt to install to `/usr/local/bin` (prompting for `sudo` if needed). If that fails, it will fall back to `$HOME/.local/bin` and notify you if you need to add this directory to your `PATH`.
 
+The script checks the download against the release's `SHA256SUMS` file. To confirm that a binary was built by this repository's release workflow, verify its attestation with the GitHub CLI:
+
+```bash
+gh attestation verify topic-linux-amd64 --repo yurirocha15/topic
+```
+
 ---
 
 ### Usage
@@ -196,18 +202,18 @@ Add user-facing changes to the `[Unreleased]` section of [CHANGELOG.md](./CHANGE
 
 1. Rename `[Unreleased]` to the new version with the release date, for example `## [0.0.4] - 2026-11-01`.
 2. Add a new empty `[Unreleased]` section above it, update the compare links at the bottom of the file, and merge the change.
-3. Start the release in one of two ways:
+3. Start the release from `main` in one of two ways:
 
    ```bash
-   # Run the workflow on a branch. It creates the tag once the build passes.
-   gh workflow run release.yml -f branch=main -f version=v0.0.4
+   # Run the workflow. It creates the tag once the build passes.
+   gh workflow run release.yml -f version=v0.0.4
 
-   # Or push a tag yourself.
+   # Or push a tag yourself. The tagged commit must be on main.
    git tag -s v0.0.4 -m v0.0.4
    git push origin v0.0.4
    ```
 
-The workflow checks the version format, requires changelog entries for that version, runs the tests, builds the amd64 and arm64 binaries, and publishes a GitHub release with that changelog section as its notes. Preview the notes with `scripts/release-notes.sh v0.0.4`.
+The workflow checks the version format, requires the commit to be on `main` and the version to have changelog entries, runs the tests, builds the amd64 and arm64 binaries, attests their build provenance, and publishes a GitHub release with that changelog section as its notes. Preview the notes with `scripts/release-notes.sh v0.0.4`.
 
 ---
 

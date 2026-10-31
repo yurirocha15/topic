@@ -2,18 +2,13 @@
 
 name: Build and Release
 
-# Runs when a vX.Y.Z tag is pushed, or manually with a branch and a new vX.Y.Z tag.
+# Runs when a vX.Y.Z tag is pushed, or manually with a new vX.Y.Z tag. Releases only come from main.
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
     inputs:
-      branch:
-        description: 'Branch to release from'
-        required: true
-        default: 'main'
-        type: string
       version:
         description: 'Version tag to create (vX.Y.Z)'
         required: true
@@ -37,7 +32,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.branch && format('refs/heads/{0}', inputs.branch) || github.ref }}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -53,6 +48,12 @@ jobs:
         run: |
           # Validates the tag format and that the changelog has notes for this version.
           scripts/release-notes.sh "$TAG" > /dev/null
+
+          git fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Releases must come from main, but $(git rev-parse HEAD) is not on main."
+            exit 1
+          fi
 
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
             echo "::error::Tag $TAG already exists."
@@ -114,6 +115,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -127,6 +131,18 @@ jobs:
           # The destination path for the downloaded artifacts.
           path: artifacts
 
+      - name: Prepare release files
+        run: |
+          mkdir release
+          cp artifacts/*/* release/
+          (cd release && sha256sum topic-* > SHA256SUMS)
+
+      # Runs before publishing, so a release is never created without provenance.
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: 'release/topic-*'
+
       - name: Create release
         env:
           # The GITHUB_TOKEN is automatically provided by GitHub Actions.
@@ -135,10 +151,6 @@ jobs:
           SHA: ${{ needs.prepare.outputs.sha }}
         run: |
           scripts/release-notes.sh "$TAG" > release-notes.md
-
-          mkdir release
-          cp artifacts/*/* release/
-          (cd release && sha256sum topic-* > SHA256SUMS)
 
           # Creates the tag for manual runs. Tags made with GITHUB_TOKEN do not start this workflow again.
           gh release create "$TAG" release/* --target "$SHA" --title "$TAG" --notes-file release-notes.md

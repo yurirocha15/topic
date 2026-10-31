@@ -12,9 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Releases are built from a pushed `vX.Y.Z` tag, or from a manual workflow run given a branch and a version tag.
+- Releases are built from a pushed `vX.Y.Z` tag or a manual workflow run given a version tag, and must come from `main`.
 - Release notes come from the matching section of this changelog.
-- Releases include a `SHA256SUMS` file.
+- Releases include a `SHA256SUMS` file and signed build provenance attestations.
 - Building from source now requires Go 1.26.
 - Updated to gopsutil v4, tview v0.42, and tcell v2.13.
 - Container memory now reports the working set on cgroup v1 and v2. Cgroup v2 previously counted only anonymous memory, and cgroup v1 included reclaimable cache.
