@@ -149,29 +149,37 @@ func updateContainerCPUUsage(state *State, fs FileReader) float64 {
 	return cpuPercent
 }
 
-// updateContainerMemUsage reads the memory usage from the cgroup filesystem.
+// updateContainerMemUsage reads the working set: usage minus the inactive file cache the kernel can reclaim.
 func updateContainerMemUsage(cgroupVersion CgroupVersion, fs FileReader) float64 {
-	if cgroupVersion == CgroupV2 {
-		// 'anon' memory is a good proxy for non-cache process memory
-		statStr, err := readStringFromFile(cgroupMemoryStatPath, fs)
-		if err != nil {
-			return 0
-		}
-		for _, line := range strings.Split(statStr, "\n") {
-			parts := strings.Fields(line)
-			if len(parts) == 2 && parts[0] == "anon" {
-				bytes, parseErr := strconv.ParseUint(parts[1], 10, 64)
-				if parseErr != nil {
-					return 0
-				}
-				return float64(bytes) / float64(bytesPerGB)
+	usagePath, statPath, inactiveField := cgroupMemoryCurrentPath, cgroupMemoryStatPath, "inactive_file"
+	if cgroupVersion == CgroupV1 {
+		usagePath, statPath, inactiveField = cgroupV1MemoryUsagePath, cgroupV1MemoryStatPath, "total_inactive_file"
+	}
+	usage, err := readUintFromFile(usagePath, fs)
+	if err != nil {
+		return 0
+	}
+	inactive := readMemoryStatField(statPath, inactiveField, fs)
+	if inactive >= usage {
+		return 0
+	}
+	return float64(usage-inactive) / float64(bytesPerGB)
+}
+
+// readMemoryStatField returns a memory.stat value, or 0 if it is missing or malformed.
+func readMemoryStatField(path, field string, fs FileReader) uint64 {
+	statStr, err := readStringFromFile(path, fs)
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(statStr, "\n") {
+		parts := strings.Fields(line)
+		if len(parts) == 2 && parts[0] == field {
+			value, parseErr := strconv.ParseUint(parts[1], 10, 64)
+			if parseErr != nil {
+				return 0
 			}
-		}
-	} else { // CgroupV1
-		// memory.usage_in_bytes includes file cache, but is the standard.
-		bytes, err := readUintFromFile(cgroupV1MemoryUsagePath, fs)
-		if err == nil {
-			return float64(bytes) / float64(bytesPerGB)
+			return value
 		}
 	}
 	return 0

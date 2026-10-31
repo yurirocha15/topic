@@ -1555,10 +1555,13 @@ func TestUpdateContainerMemUsage(t *testing.T) {
 		expectedGB    float64
 	}{
 		{
-			name:          "CgroupV2 with anon memory",
+			name:          "CgroupV2 working set",
 			cgroupVersion: CgroupV2,
-			mockFiles:     map[string]string{"/sys/fs/cgroup/memory.stat": "anon 1073741824\nfile 512"}, // 1 GB
-			expectedGB:    1.0,
+			mockFiles: map[string]string{
+				"/sys/fs/cgroup/memory.current": "1610612736",
+				"/sys/fs/cgroup/memory.stat":    "anon 1073741824\ninactive_file 536870912",
+			}, // 1.5 GB used, 0.5 GB reclaimable
+			expectedGB: 1.0,
 		},
 		{
 			name:          "CgroupV1 with usage in bytes",
@@ -1573,9 +1576,9 @@ func TestUpdateContainerMemUsage(t *testing.T) {
 			expectedGB:    0.0,
 		},
 		{
-			name:          "Malformed anon memory",
+			name:          "Malformed memory usage",
 			cgroupVersion: CgroupV2,
-			mockFiles:     map[string]string{"/sys/fs/cgroup/memory.stat": "anon not-a-number"},
+			mockFiles:     map[string]string{"/sys/fs/cgroup/memory.current": "not-a-number"},
 			expectedGB:    0.0,
 		},
 	}
@@ -2085,8 +2088,9 @@ func TestUpdateProcessList(t *testing.T) {
 // TestUpdateAll tests the coordinator function that fetches all dynamic data.
 func TestUpdateAll(t *testing.T) {
 	mockFS := MockFileReader{files: map[string]string{
-		"/sys/fs/cgroup/cpu.stat":    "usage_usec 2000000",
-		"/sys/fs/cgroup/memory.stat": "anon 1073741824",
+		"/sys/fs/cgroup/cpu.stat":       "usage_usec 2000000",
+		"/sys/fs/cgroup/memory.current": "1073741824",
+		"/sys/fs/cgroup/memory.stat":    "anon 1073741824",
 	}}
 	mockRunner := MockCommandRunner{outputs: map[string]string{
 		"nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits": "50, 2048",

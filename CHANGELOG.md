@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Releases are built from a pushed `vX.Y.Z` tag, or from a manual workflow run given a branch and a version tag.
 - Release notes come from the matching section of this changelog.
+- Container memory now reports the working set on cgroup v1 and v2. Cgroup v2 previously counted only anonymous memory, and cgroup v1 included reclaimable cache.
 
 ### Fixed
 

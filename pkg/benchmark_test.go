@@ -254,7 +254,8 @@ func BenchmarkUpdateLiveGPUUsage(b *testing.B) {
 func BenchmarkUpdateContainerMemUsage(b *testing.B) {
 	fs := MockFileReader{
 		files: map[string]string{
-			cgroupMemoryStatPath: "anon 1073741824\nfile 536870912\nkernel_stack 16384\n",
+			cgroupMemoryCurrentPath: "1610612736",
+			cgroupMemoryStatPath:    "anon 1073741824\ninactive_file 536870912\nkernel_stack 16384\n",
 		},
 	}
 
