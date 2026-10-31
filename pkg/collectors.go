@@ -179,7 +179,6 @@ func collectDynamicInfoWithTiming(
 	var wg sync.WaitGroup
 
 	run := func(name string, collect func()) {
-		defer wg.Done()
 		start := now()
 		collect()
 		elapsed := now().Sub(start)
@@ -189,8 +188,7 @@ func collectDynamicInfoWithTiming(
 	}
 
 	for _, entry := range dynamicCollectorEntries(collectors, &dynamic) {
-		wg.Add(1)
-		go run(entry.name, entry.collect)
+		wg.Go(func() { run(entry.name, entry.collect) })
 	}
 	wg.Wait()
 

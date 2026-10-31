@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -123,8 +122,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+
 	fileReader := OSFileReader{}
-	cmdRunner := OSCommandRunner{Timeout: commandTimeout}
+	cmdRunner := OSCommandRunner{Context: ctx, Timeout: commandTimeout}
 	stater := OSStater{}
 
 	staticInfo, err := getStaticInfo(fileReader, cmdRunner, stater)
@@ -156,8 +158,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-	defer stop()
 	if err = runTUI(ctx, tview.NewApplication(), config, state, refresh); err != nil {
 		fmt.Fprintf(stderr, "Could not start application: %v\n", err)
 		return exitFailure
@@ -229,7 +229,7 @@ func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state
 		leftHeight := updateResourceView(resourceView, state)
 		rightHeight := updateInfoView(infoView, state)
 		topPanel.ResizeItem(infoView, currentInfoPanelWidth(state), 0)
-		topPanelHeight := int(math.Max(float64(leftHeight), float64(rightHeight))) + borderHeight
+		topPanelHeight := max(leftHeight, rightHeight) + borderHeight
 		mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
 		updateProcessTable(processTable, state)
 	}

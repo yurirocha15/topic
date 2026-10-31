@@ -36,6 +36,7 @@ type CommandRunner interface {
 
 // OSCommandRunner is the default implementation using the os/exec package.
 type OSCommandRunner struct {
+	Context context.Context // Stops running commands on shutdown; defaults to context.Background
 	Timeout time.Duration
 }
 
@@ -44,7 +45,11 @@ func (ocr OSCommandRunner) Output(name string, arg ...string) ([]byte, error) {
 	if timeout <= 0 {
 		timeout = commandTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	parent := ocr.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	return exec.CommandContext(ctx, name, arg...).Output()
 }

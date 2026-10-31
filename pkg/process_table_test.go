@@ -1,8 +1,10 @@
 package main
 
 import (
+	"math"
 	"math/rand"
 	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -362,5 +364,24 @@ func TestSortProcessesResultIsIndependentOfInputOrder(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSortProcessesHandlesNaN(t *testing.T) {
+	nan := math.NaN()
+	processes := []ProcessInfo{
+		{PID: 3, CPUPercent: nan},
+		{PID: 1, CPUPercent: 5},
+		{PID: 2, CPUPercent: nan},
+		{PID: 4, CPUPercent: 9},
+	}
+	sortProcesses(processes, SortByCPU, false)
+
+	pids := make([]int32, 0, len(processes))
+	for _, process := range processes {
+		pids = append(pids, process.PID)
+	}
+	if want := []int32{4, 1, 2, 3}; !slices.Equal(pids, want) {
+		t.Fatalf("sorted PIDs = %v, want %v", pids, want)
 	}
 }

@@ -1,7 +1,8 @@
 package main
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -61,8 +62,11 @@ func updateNetworkUsageWithProvider(state *State, provider NetworkProvider) []Ne
 			TXErrors:      counter.Errout,
 		})
 	}
-	sort.Slice(usage, func(i, j int) bool {
-		return usage[i].RXBytesPerSec+usage[i].TXBytesPerSec > usage[j].RXBytesPerSec+usage[j].TXBytesPerSec
+	slices.SortFunc(usage, func(left, right NetworkUsage) int {
+		return cmp.Or(
+			cmp.Compare(right.RXBytesPerSec+right.TXBytesPerSec, left.RXBytesPerSec+left.TXBytesPerSec),
+			cmp.Compare(left.Name, right.Name),
+		)
 	})
 	state.prevNetwork = current
 	state.prevNetTime = now
@@ -100,8 +104,11 @@ func updateDiskIOUsageWithProvider(state *State, provider DiskIOProvider) []Disk
 			WriteOpsPerSec:   rateUint64(prev.WriteCount, next.WriteCount, elapsed),
 		})
 	}
-	sort.Slice(usage, func(i, j int) bool {
-		return usage[i].ReadBytesPerSec+usage[i].WriteBytesPerSec > usage[j].ReadBytesPerSec+usage[j].WriteBytesPerSec
+	slices.SortFunc(usage, func(left, right DiskIOUsage) int {
+		return cmp.Or(
+			cmp.Compare(right.ReadBytesPerSec+right.WriteBytesPerSec, left.ReadBytesPerSec+left.WriteBytesPerSec),
+			cmp.Compare(left.Name, right.Name),
+		)
 	})
 	state.prevDiskIO = current
 	state.prevDiskTime = now
@@ -179,7 +186,7 @@ func readKeyedUintFile(path string, fs FileReader) map[string]uint64 {
 		return nil
 	}
 	values := make(map[string]uint64)
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != keyedMetricFieldCount {
 			continue
@@ -199,7 +206,7 @@ func readPressureFile(resource string, path string, fs FileReader) (PressureStat
 		return PressureStat{}, false
 	}
 	stat := PressureStat{Resource: resource}
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue

@@ -1,9 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -42,7 +43,7 @@ func updateProcessTable(table *tview.Table, state *State) {
 	unlockAfterRender := true
 
 	if needsProcessTransform(ui) {
-		processes = append([]ProcessInfo(nil), state.dynamic.Processes...)
+		processes = slices.Clone(state.dynamic.Processes)
 		state.dynamic.mu.Unlock()
 		unlockAfterRender = false
 		processes = prepareProcessRows(processes, ui)
@@ -189,43 +190,37 @@ func processMatchesFilter(process ProcessInfo, filter string) bool {
 }
 
 func sortProcesses(processes []ProcessInfo, sortColumn ProcessSortColumn, reverse bool) {
-	sort.SliceStable(processes, func(i, j int) bool {
+	slices.SortStableFunc(processes, func(left, right ProcessInfo) int {
 		if reverse {
-			return compareProcesses(processes[j], processes[i], sortColumn)
+			return compareProcesses(right, left, sortColumn)
 		}
-		return compareProcesses(processes[i], processes[j], sortColumn)
+		return compareProcesses(left, right, sortColumn)
 	})
 }
 
 // compareProcesses orders by the sort column, breaking ties by ascending PID.
-func compareProcesses(left ProcessInfo, right ProcessInfo, sortColumn ProcessSortColumn) bool {
-	if comparePrimary(left, right, sortColumn) {
-		return true
-	}
-	if comparePrimary(right, left, sortColumn) {
-		return false
-	}
-	return left.PID < right.PID
+func compareProcesses(left ProcessInfo, right ProcessInfo, sortColumn ProcessSortColumn) int {
+	return cmp.Or(comparePrimary(left, right, sortColumn), cmp.Compare(left.PID, right.PID))
 }
 
-func comparePrimary(left ProcessInfo, right ProcessInfo, sortColumn ProcessSortColumn) bool {
+func comparePrimary(left ProcessInfo, right ProcessInfo, sortColumn ProcessSortColumn) int {
 	switch sortColumn {
 	case SortByMemory:
-		return left.MemPercent > right.MemPercent
+		return cmp.Compare(right.MemPercent, left.MemPercent)
 	case SortByGPU:
-		return left.GPUUtil > right.GPUUtil
+		return cmp.Compare(right.GPUUtil, left.GPUUtil)
 	case SortByGPUMemory:
-		return left.GPUMemPercent > right.GPUMemPercent
+		return cmp.Compare(right.GPUMemPercent, left.GPUMemPercent)
 	case SortByPID:
-		return left.PID < right.PID
+		return cmp.Compare(left.PID, right.PID)
 	case SortByUser:
-		return left.User < right.User
+		return cmp.Compare(left.User, right.User)
 	case SortByCommand:
-		return left.Command < right.Command
+		return cmp.Compare(left.Command, right.Command)
 	case SortByCPU:
 		fallthrough
 	default:
-		return left.CPUPercent > right.CPUPercent
+		return cmp.Compare(right.CPUPercent, left.CPUPercent)
 	}
 }
 
@@ -517,11 +512,8 @@ func updateProcessListWithProvider(
 	tracker.samples = samples
 	tracker.sampledAt = now
 
-	sort.Slice(processList, func(i, j int) bool {
-		if processList[i].rawCPU != processList[j].rawCPU {
-			return processList[i].rawCPU > processList[j].rawCPU
-		}
-		return processList[i].PID < processList[j].PID
+	slices.SortFunc(processList, func(left, right ProcessInfo) int {
+		return cmp.Or(cmp.Compare(right.rawCPU, left.rawCPU), cmp.Compare(left.PID, right.PID))
 	})
 	return processList
 }

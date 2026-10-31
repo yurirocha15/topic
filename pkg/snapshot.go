@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,15 +49,15 @@ func snapshotFromState(state *State) ExportSnapshot {
 		ContainerMemUsedGB: state.dynamic.ContainerMemUsedGB,
 		HostCPUUsage:       state.dynamic.HostCPUUsage,
 		HostMemUsedGB:      state.dynamic.HostMemUsedGB,
-		LiveGPUUsage:       append([]GPUUsage(nil), state.dynamic.LiveGPUUsage...),
-		StorageUsage:       append([]StorageUsage(nil), state.dynamic.StorageUsage...),
-		NetworkUsage:       append([]NetworkUsage(nil), state.dynamic.NetworkUsage...),
-		DiskIOUsage:        append([]DiskIOUsage(nil), state.dynamic.DiskIOUsage...),
+		LiveGPUUsage:       slices.Clone(state.dynamic.LiveGPUUsage),
+		StorageUsage:       slices.Clone(state.dynamic.StorageUsage),
+		NetworkUsage:       slices.Clone(state.dynamic.NetworkUsage),
+		DiskIOUsage:        slices.Clone(state.dynamic.DiskIOUsage),
 		CgroupEvents:       state.dynamic.CgroupEvents,
 		PIDUsage:           state.dynamic.PIDUsage,
-		Pressure:           append([]PressureStat(nil), state.dynamic.Pressure...),
-		Alerts:             append([]Alert(nil), state.dynamic.Alerts...),
-		Processes:          append([]ProcessInfo(nil), state.dynamic.Processes...),
+		Pressure:           slices.Clone(state.dynamic.Pressure),
+		Alerts:             slices.Clone(state.dynamic.Alerts),
+		Processes:          slices.Clone(state.dynamic.Processes),
 	}
 	history := ExportHistory{
 		CPU:     (&state.history.CPU).Ordered(),
@@ -78,9 +79,9 @@ func snapshotFromState(state *State) ExportSnapshot {
 			HostCores:              staticInfo.HostCores,
 			HostMemTotalGB:         staticInfo.HostMemTotalGB,
 			GPUCount:               staticInfo.GPUCount,
-			GPUTotalGB:             append([]float64(nil), staticInfo.GPUTotalGB...),
-			StorageMounts:          append([]StorageMount(nil), staticInfo.StorageMounts...),
-			Integrations:           append([]IntegrationStatus(nil), staticInfo.Integrations...),
+			GPUTotalGB:             slices.Clone(staticInfo.GPUTotalGB),
+			StorageMounts:          slices.Clone(staticInfo.StorageMounts),
+			Integrations:           slices.Clone(staticInfo.Integrations),
 		},
 		Dynamic:  dynamic,
 		History:  history,

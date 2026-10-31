@@ -12,7 +12,7 @@ func getStaticGPUInfo(runner CommandRunner) (int, []float64, error) {
 		return 0, nil, err
 	}
 	var totals []float64
-	for _, line := range strings.Split(string(outMem), "\n") {
+	for line := range strings.SplitSeq(string(outMem), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

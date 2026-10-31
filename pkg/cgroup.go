@@ -30,39 +30,32 @@ func readStringFromFile(path string, fs FileReader) (string, error) {
 
 // getContainerCPULimit reads the CPU limit from cgroup files and returns it as a percentage of host cores.
 func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int, fs FileReader) float64 {
-	var quota, period uint64
-	if cgroupVersion == CgroupV2 {
-		cpuMaxStr, err := readStringFromFile(cgroupCPUMaxPath, fs)
-		if err != nil {
-			return float64(hostCores)
-		}
-		parts := strings.Fields(cpuMaxStr)
-		if len(parts) == minCPUInfoCount {
-			if parts[0] == cgroupMaxToken {
-				return float64(hostCores)
-			}
-			quota, err = strconv.ParseUint(parts[0], 10, 64)
-			if err != nil {
-				return float64(hostCores)
-			}
-			period, err = strconv.ParseUint(parts[1], 10, 64)
-			if err != nil {
-				return float64(hostCores)
-			}
-		}
-	} else { // CgroupV1
-		q, err1 := readUintFromFile(cgroupV1CPUQuotaPath, fs)
-		p, err2 := readUintFromFile(cgroupV1CPUPeriodPath, fs)
-		if err1 == nil && err2 == nil {
-			quota, period = q, p
-		} else {
-			return float64(hostCores)
-		}
-	}
-	if quota > 0 && period > 0 {
+	quota, period, ok := readCPUQuota(cgroupVersion, fs)
+	if ok && quota > 0 && period > 0 {
 		return float64(quota) / float64(period)
 	}
 	return float64(hostCores)
+}
+
+// readCPUQuota returns the CPU quota and period, and false if no limit is set or readable.
+func readCPUQuota(cgroupVersion CgroupVersion, fs FileReader) (uint64, uint64, bool) {
+	if cgroupVersion == CgroupV1 {
+		quota, quotaErr := readUintFromFile(cgroupV1CPUQuotaPath, fs)
+		period, periodErr := readUintFromFile(cgroupV1CPUPeriodPath, fs)
+		return quota, period, quotaErr == nil && periodErr == nil
+	}
+
+	cpuMaxStr, err := readStringFromFile(cgroupCPUMaxPath, fs)
+	if err != nil {
+		return 0, 0, false
+	}
+	parts := strings.Fields(cpuMaxStr)
+	if len(parts) != minCPUInfoCount || parts[0] == cgroupMaxToken {
+		return 0, 0, false
+	}
+	quota, quotaErr := strconv.ParseUint(parts[0], 10, 64)
+	period, periodErr := strconv.ParseUint(parts[1], 10, 64)
+	return quota, period, quotaErr == nil && periodErr == nil
 }
 
 // getContainerMemLimit reads the memory limit from cgroup files and returns it in bytes and GB.
@@ -101,7 +94,7 @@ func readContainerCPUUsage(cgroupVersion CgroupVersion, fs FileReader) (uint64, 
 		if err != nil {
 			return 0, false
 		}
-		for _, line := range strings.Split(statStr, "\n") {
+		for line := range strings.SplitSeq(statStr, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) == 2 && parts[0] == "usage_usec" {
 				usage, parseErr := strconv.ParseUint(parts[1], 10, 64)
@@ -172,7 +165,7 @@ func readMemoryStatField(path, field string, fs FileReader) uint64 {
 	if err != nil {
 		return 0
 	}
-	for _, line := range strings.Split(statStr, "\n") {
+	for line := range strings.SplitSeq(statStr, "\n") {
 		parts := strings.Fields(line)
 		if len(parts) == 2 && parts[0] == field {
 			value, parseErr := strconv.ParseUint(parts[1], 10, 64)

@@ -246,3 +246,24 @@ func TestRunTUIDoesNotOverlapInitialRefresh(t *testing.T) {
 		t.Errorf("refresh overlapped %d times", got)
 	}
 }
+
+func TestOSCommandRunnerStopsWithContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	runner := OSCommandRunner{Context: ctx, Timeout: time.Minute}
+	if _, err := runner.Output("sleep", "30"); err == nil {
+		t.Fatal("expected an error from a cancelled command")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("command took %v to stop", elapsed)
+	}
+}
+
+func TestOSCommandRunnerWorksWithoutContext(t *testing.T) {
+	output, err := OSCommandRunner{Timeout: 5 * time.Second}.Output("echo", "ok")
+	if err != nil || strings.TrimSpace(string(output)) != "ok" {
+		t.Fatalf("Output() = %q, %v", output, err)
+	}
+}
