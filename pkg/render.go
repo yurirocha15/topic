@@ -155,10 +155,10 @@ func calculateBarWidth(availableWidth int, labels []string, infos []string) int 
 func newBarData(label string, percent float64, info string) BarData {
 	return BarData{
 		Label:      label,
-		LabelWidth: tview.TaggedStringWidth(label),
+		LabelWidth: plainTextWidth(label),
 		Percent:    percent,
 		Info:       info,
-		InfoWidth:  tview.TaggedStringWidth(info),
+		InfoWidth:  plainTextWidth(info),
 	}
 }
 
@@ -172,8 +172,9 @@ func calculateStorageBars(state *State) []BarData {
 	for _, storage := range state.dynamic.StorageUsage {
 		// Shorten long mount paths for display
 		displayPath := storage.Path
-		if len(displayPath) > maxDisplayPathLength {
-			displayPath = "..." + displayPath[len(displayPath)-12:]
+		if pathRunes := []rune(displayPath); len(pathRunes) > maxDisplayPathLength {
+			keptRunes := pathRunes[len(pathRunes)-maxDisplayPathLength+len(displayPathPrefix):]
+			displayPath = displayPathPrefix + string(keptRunes)
 		}
 
 		label := fmt.Sprintf("DISK %s", displayPath)
@@ -411,12 +412,12 @@ func writeMetricLine(
 	}
 
 	builder.WriteString(themeLabelTag)
-	builder.WriteString(padPlainText(label, labelWidth))
+	builder.WriteString(tview.Escape(padPlainText(label, labelWidth)))
 	builder.WriteString(themeResetTag)
 	builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
 	if value != "" {
 		builder.WriteString(valueTag)
-		builder.WriteString(value)
+		builder.WriteString(tview.Escape(value))
 		builder.WriteString(themeResetTag)
 	}
 	if trend != "" {
@@ -513,14 +514,14 @@ func calculateMaxWidthsFromSlices(labels []string, infos []string) (int, int) {
 	maxInfoWidth := 0
 
 	for _, label := range labels {
-		labelWidth := tview.TaggedStringWidth(label)
+		labelWidth := plainTextWidth(label)
 		if labelWidth > maxLabelWidth {
 			maxLabelWidth = labelWidth
 		}
 	}
 
 	for _, info := range infos {
-		infoWidth := tview.TaggedStringWidth(info)
+		infoWidth := plainTextWidth(info)
 		if infoWidth > maxInfoWidth {
 			maxInfoWidth = infoWidth
 		}
@@ -551,14 +552,14 @@ func barLabelWidth(bar BarData) int {
 	if bar.LabelWidth > 0 {
 		return bar.LabelWidth
 	}
-	return tview.TaggedStringWidth(bar.Label)
+	return plainTextWidth(bar.Label)
 }
 
 func barInfoWidth(bar BarData) int {
 	if bar.InfoWidth > 0 || bar.Info == "" {
 		return bar.InfoWidth
 	}
-	return tview.TaggedStringWidth(bar.Info)
+	return plainTextWidth(bar.Info)
 }
 
 func buildAlignedRow(
@@ -605,7 +606,7 @@ func formatAlignedBar(bar BarData, barWidth int, maxLabelWidth int, maxInfoWidth
 
 	var builder strings.Builder
 	builder.WriteString(themeLabelTag)
-	builder.WriteString(label)
+	builder.WriteString(tview.Escape(label))
 	builder.WriteString(themeResetTag)
 	builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
 	builder.WriteString(formatUsagePercent(bar.Percent))
@@ -614,7 +615,7 @@ func formatAlignedBar(bar BarData, barWidth int, maxLabelWidth int, maxInfoWidth
 	if maxInfoWidth > 0 {
 		builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
 		builder.WriteString(themeMutedTag)
-		builder.WriteString(info)
+		builder.WriteString(tview.Escape(info))
 		builder.WriteString(themeResetTag)
 	}
 
@@ -654,6 +655,11 @@ func padPlainText(value string, width int) string {
 		return value
 	}
 	return value + strings.Repeat(" ", padding)
+}
+
+// plainTextWidth measures unescaped text, in which brackets are not display tags.
+func plainTextWidth(value string) int {
+	return tview.TaggedStringWidth(tview.Escape(value))
 }
 
 func visibleRuneCount(value string) int {

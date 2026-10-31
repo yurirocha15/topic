@@ -38,5 +38,6 @@
 - Keep resource rows on the shared label/percentage/bar/detail grid. At wide widths the two columns must retain a visible divider; narrow layouts must not overflow.
 - Use the shared semantic palette for usage values: green below 70%, gold from 70% to 89.9%, and red at 90% or above.
 - When changing the composed TUI, validate both tcell simulation sizes and a real pseudo-terminal interaction flow. Update `static/img/topic.png` when the README screenshot becomes materially stale.
+- Text from processes, mounts, interfaces, or user input is untrusted. Pass it through `tview.Escape` after truncating and measuring it, at the point it reaches a tagged tview sink.
 - Preserve the TUI behavior unless a task explicitly asks for a visual/layout change.
 - Add user-facing changes to the `[Unreleased]` section of `CHANGELOG.md`. A release fails unless its version has a section with entries.

@@ -54,7 +54,7 @@ func (fakeFileInfo) ModTime() time.Time {
 }
 
 func (fakeFileInfo) IsDir() bool {
-	return false
+	return true
 }
 
 func (fakeFileInfo) Sys() any {
@@ -265,7 +265,7 @@ func (ms MockStater) Stat(_ string) (os.FileInfo, error) {
 		// Return an error that satisfies os.IsNotExist.
 		return nil, os.ErrNotExist
 	}
-	return os.FileInfo(nil), nil // Return nil, nil for a successful stat.
+	return fakeFileInfo{}, nil
 }
 
 // --- Unit Tests ---
@@ -2289,7 +2289,7 @@ func TestStorageProviderPaths(t *testing.T) {
 		},
 	}
 
-	mounts, err := getStaticStorageInfoWithProvider(provider)
+	mounts, err := getStaticStorageInfoWithProvider(provider, MockStater{})
 	if err != nil {
 		t.Fatalf("Unexpected error getting static storage info: %v", err)
 	}
@@ -2305,7 +2305,8 @@ func TestStorageProviderPaths(t *testing.T) {
 		t.Fatalf("Unexpected storage usage: %+v", usage)
 	}
 
-	got, err := getStaticStorageInfoWithProvider(MockStorageProvider{err: errors.New("partition failure")})
+	failing := MockStorageProvider{err: errors.New("partition failure")}
+	got, err := getStaticStorageInfoWithProvider(failing, MockStater{})
 	if got != nil || err == nil {
 		t.Fatalf("Expected nil mounts and error on partition failure, got mounts=%+v err=%v", got, err)
 	}

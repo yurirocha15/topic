@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/rivo/tview"
 )
 
 const onceTextWidth = 120
@@ -93,9 +95,14 @@ func writeJSONSnapshot(writer io.Writer, state *State) error {
 	return encoder.Encode(snapshotFromState(state))
 }
 
+// plainText removes display markup and restores escaped text.
+func plainText(text string) string {
+	return tview.NewTextView().SetDynamicColors(true).SetText(text).GetText(true)
+}
+
 func onceText(state *State) string {
 	var builder strings.Builder
-	builder.WriteString(buildResourceText(onceTextWidth, state))
+	builder.WriteString(plainText(buildResourceText(onceTextWidth, state)))
 	snapshot := snapshotFromState(state)
 	builder.WriteString("\nProcesses:\n")
 	for _, process := range snapshot.Dynamic.Processes {

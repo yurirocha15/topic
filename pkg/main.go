@@ -52,6 +52,7 @@ const (
 	compactBarWidth           = 4                 // Smallest useful bar when the terminal is constrained
 	columnSpacing             = 5                 // Width of the divider between metric columns
 	maxDisplayPathLength      = 15                // Maximum length for mount path display
+	displayPathPrefix         = "..."             // Marks a shortened mount path
 	metricFieldSpacing        = 2                 // Space between label, value, bar, and detail
 	metricLeadingFieldGaps    = 2                 // Gaps between label, value, and bar
 	metricPercentWidth        = 6                 // Visible width of a percentage value
@@ -371,7 +372,7 @@ func filterStatusText(ui UIState) string {
 	if len([]rune(filter)) > maxFilterStatusWidth {
 		filter = string([]rune(filter)[:maxFilterStatusWidth-1]) + "…"
 	}
-	return themeAttentionTag + filter + themeResetTag
+	return themeAttentionTag + tview.Escape(filter) + themeResetTag
 }
 
 func sortStatusText(ui UIState) string {

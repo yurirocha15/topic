@@ -306,7 +306,7 @@ func getStaticInfoWithProviders(
 	}
 	info.GPUCount, info.GPUTotalGB, err = getStaticGPUInfo(runner)
 	_ = err
-	info.StorageMounts, err = getStaticStorageInfoWithProvider(storageProvider)
+	info.StorageMounts, err = getStaticStorageInfoWithProvider(storageProvider, stater)
 	_ = err
 	return info, nil
 }

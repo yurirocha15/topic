@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -129,7 +130,7 @@ func updateProcessTable(table *tview.Table, state *State) {
 		table.RemoveRow(row)
 	}
 
-	table.SetTitle(processTableTitle(ui, len(processes), totalProcesses))
+	table.SetTitle(tview.Escape(processTableTitle(ui, len(processes), totalProcesses)))
 }
 
 func setTableCell(
@@ -142,7 +143,7 @@ func setTableCell(
 	expansion int,
 ) {
 	cell := table.GetCell(row, column)
-	cell.SetText(text).
+	cell.SetText(tview.Escape(text)).
 		SetTextColor(color).
 		SetAlign(tview.AlignLeft).
 		SetSelectable(selectable).
@@ -528,13 +529,23 @@ func updateProcessListWithProvider(
 func resolveProcessCommand(p ProcessHandle) (string, error) {
 	cmdline, err := p.Cmdline()
 	if err == nil && cmdline != "" {
-		return cmdline, nil
+		return stripControlCharacters(cmdline), nil
 	}
 	name, err := p.Name()
 	if err != nil {
 		return "", fmt.Errorf("process name: %w", err)
 	}
-	return "[" + name + "]", nil
+	return "[" + stripControlCharacters(name) + "]", nil
+}
+
+// stripControlCharacters keeps any process from sending terminal escape sequences through its command line.
+func stripControlCharacters(text string) string {
+	return strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) {
+			return ' '
+		}
+		return character
+	}, text)
 }
 
 func computeContainerPercents(cpuPercent float64, rssBytes uint64, static *StaticInfo) (float64, float64) {

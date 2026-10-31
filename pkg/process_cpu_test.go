@@ -95,7 +95,8 @@ func TestProcessListBreaksCPUTiesByPID(t *testing.T) {
 		MockProcessHandle{pid: 1, name: "a"},
 		MockProcessHandle{pid: 2, name: "b"},
 	}}
-	processes := updateProcessListWithProvider(static, &CountingCommandRunner{}, provider, &processCPUTracker{}, time.Now())
+	tracker := &processCPUTracker{}
+	processes := updateProcessListWithProvider(static, &CountingCommandRunner{}, provider, tracker, time.Now())
 	for index, want := range []int32{1, 2, 3} {
 		if processes[index].PID != want {
 			t.Fatalf("processes[%d].PID = %d, want %d", index, processes[index].PID, want)

@@ -16,6 +16,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Release notes come from the matching section of this changelog.
 - Container memory now reports the working set on cgroup v1 and v2. Cgroup v2 previously counted only anonymous memory, and cgroup v1 included reclaimable cache.
 
+### Security
+
+- Process names, users, mount paths, interface names, filter text, and dialogs are shown literally, so a process can no longer restyle or hide text on screen with display markup.
+- Control characters are removed from process commands, so a process can no longer send terminal escape sequences through `--once` output.
+
 ### Fixed
 
 - `--once` and `--json` now measure container CPU, network, and disk rates over a 250 ms window instead of reporting 0.
@@ -28,6 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Metric history no longer crashes on a negative value.
 - Process `%CPU` shows current usage instead of a lifetime average, and a reused PID no longer inherits the old process's numbers.
 - Process `%MEM` uses host memory when the container has no memory limit, instead of showing 0.
+- `--once` text output no longer contains display markup such as `[white]`.
+- Kernel threads such as `[kthreadd]` and the `[paused]` table title are no longer hidden.
+- Signals are not sent if the selected process exited or its PID was reused while a dialog was open.
+- Long mount paths are shortened without splitting non-ASCII characters.
+- All single-file bind mounts are hidden from storage, not only `/etc/hosts`, `/etc/hostname`, and `/etc/resolv.conf`.
 
 ## [0.0.3] - 2026-10-31
 

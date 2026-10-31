@@ -276,20 +276,46 @@ func showSignalDialog(pages *tview.Pages, state *State, table *tview.Table, sign
 	showModal(pages, "signal", text, []string{signalTermLabel, signalKillLabel, "Cancel"}, func(_ int, label string) {
 		switch label {
 		case signalTermLabel:
-			sendProcessSignal(pages, signaler, process.PID, syscall.SIGTERM)
+			signalIfUnchanged(pages, state, signaler, process, syscall.SIGTERM)
 		case signalKillLabel:
-			confirmSIGKILL(pages, signaler, process.PID)
+			confirmSIGKILL(pages, state, signaler, process)
 		}
 	})
 }
 
-func confirmSIGKILL(pages *tview.Pages, signaler ProcessSignaler, pid int32) {
-	text := fmt.Sprintf("Really send SIGKILL to PID %d?\n\nThis cannot be handled by the process.", pid)
+func confirmSIGKILL(pages *tview.Pages, state *State, signaler ProcessSignaler, process ProcessInfo) {
+	text := fmt.Sprintf("Really send SIGKILL to PID %d?\n\nThis cannot be handled by the process.", process.PID)
 	showModal(pages, "signal-confirm", text, []string{"Kill", "Cancel"}, func(_ int, label string) {
 		if label == "Kill" {
-			sendProcessSignal(pages, signaler, pid, syscall.SIGKILL)
+			signalIfUnchanged(pages, state, signaler, process, syscall.SIGKILL)
 		}
 	})
+}
+
+// signalIfUnchanged re-checks the process because the PID may have been reused while a dialog was open.
+func signalIfUnchanged(
+	pages *tview.Pages,
+	state *State,
+	signaler ProcessSignaler,
+	process ProcessInfo,
+	signal os.Signal,
+) {
+	if !isProcessUnchanged(state, process) {
+		showMessage(pages, fmt.Sprintf("PID %d is no longer running", process.PID))
+		return
+	}
+	sendProcessSignal(pages, signaler, process.PID, signal)
+}
+
+func isProcessUnchanged(state *State, process ProcessInfo) bool {
+	state.dynamic.mu.Lock()
+	defer state.dynamic.mu.Unlock()
+	for _, current := range state.dynamic.Processes {
+		if current.PID == process.PID {
+			return current.StartTime.Equal(process.StartTime)
+		}
+	}
+	return false
 }
 
 func sendProcessSignal(pages *tview.Pages, signaler ProcessSignaler, pid int32, signal os.Signal) {
@@ -316,7 +342,7 @@ func showModal(
 	done func(buttonIndex int, buttonLabel string),
 ) {
 	modal := tview.NewModal().
-		SetText(text).
+		SetText(tview.Escape(text)).
 		AddButtons(buttons).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			pages.RemovePage(name)

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func getStaticStorageInfoWithProvider(provider StorageProvider) ([]StorageMount, error) {
+func getStaticStorageInfoWithProvider(provider StorageProvider, stater Stater) ([]StorageMount, error) {
 	partitions, err := provider.Partitions(false)
 	if err != nil {
 		return nil, fmt.Errorf("list partitions: %w", err)
@@ -15,6 +15,11 @@ func getStaticStorageInfoWithProvider(provider StorageProvider) ([]StorageMount,
 	for _, partition := range partitions {
 		// Skip virtual filesystems and temporary mounts
 		if shouldSkipFilesystem(partition.Fstype, partition.Mountpoint) {
+			continue
+		}
+
+		// Skip files bind-mounted into the container, which report the usage of the host's disk
+		if info, statErr := stater.Stat(partition.Mountpoint); statErr == nil && !info.IsDir() {
 			continue
 		}
 
