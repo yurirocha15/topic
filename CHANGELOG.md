@@ -21,8 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
-- Process names, users, mount paths, interface names, filter text, and dialogs are shown literally, so a process can no longer restyle or hide text on screen with display markup.
-- Control characters are removed from process commands, so a process can no longer send terminal escape sequences through `--once` output.
+- Process names, users, mount paths, interface names, filter text, and dialogs are shown literally, so a process can no longer restyle or hide text on screen, or disguise text as a hyperlink, with display markup.
+- Control, bidirectional, and other format characters are removed from displayed process and system names, so a process can no longer send terminal escape sequences through `--once` output or reorder how its command is displayed.
+- Signals are bound to the process through a pidfd and checked against its start time, so a reused PID cannot receive a signal meant for an exited process.
+- `install.sh` verifies the download against the release's `SHA256SUMS` file when one is available.
 
 ### Fixed
 
@@ -38,7 +40,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Process `%MEM` uses host memory when the container has no memory limit, instead of showing 0.
 - `--once` text output no longer contains display markup such as `[white]`.
 - Kernel threads such as `[kthreadd]` and the `[paused]` table title are no longer hidden.
-- Signals are not sent if the selected process exited or its PID was reused while a dialog was open.
 - Long mount paths are shortened without splitting non-ASCII characters.
 - All single-file bind mounts are hidden from storage, not only `/etc/hosts`, `/etc/hostname`, and `/etc/resolv.conf`.
 

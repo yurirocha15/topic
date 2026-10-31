@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/shirou/gopsutil/v4/disk"
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 const testSpoofCommand = "[red]evil[-] --flag"
@@ -137,31 +140,87 @@ func TestProcessCommandDropsControlCharacters(t *testing.T) {
 	}
 }
 
-func TestSignalIsSkippedWhenProcessChanged(t *testing.T) {
-	started := time.Now()
-	process := ProcessInfo{PID: 42, StartTime: started}
-	tests := []struct {
-		name    string
-		current []ProcessInfo
-		want    int
-	}{
-		{"same process", []ProcessInfo{{PID: 42, StartTime: started}}, 1},
-		{"exited", []ProcessInfo{{PID: 7, StartTime: started}}, 0},
-		{"pid reused", []ProcessInfo{{PID: 42, StartTime: started.Add(time.Second)}}, 0},
+func TestSendProcessSignalReportsChangedProcess(t *testing.T) {
+	pages := tview.NewPages()
+	sendProcessSignal(pages, &MockProcessSignaler{err: errProcessChanged}, ProcessInfo{PID: 42}, syscall.SIGTERM)
+	assertOnScreen(t, drawOnScreen(t, pages), "PID 42 is no longer running")
+}
+
+func TestOSProcessSignalerChecksStartTime(t *testing.T) {
+	command := exec.Command("sleep", "30")
+	if err := command.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			state := &State{dynamic: DynamicInfo{Processes: test.current}}
-			signaler := &MockProcessSignaler{}
-			pages := tview.NewPages()
-			signalIfUnchanged(pages, state, signaler, process, syscall.SIGTERM)
-			if len(signaler.calls) != test.want {
-				t.Fatalf("signal calls = %d, want %d", len(signaler.calls), test.want)
-			}
-			if test.want == 0 {
-				assertOnScreen(t, drawOnScreen(t, pages), "PID 42 is no longer running")
-			}
-		})
+	finished := make(chan error, 1)
+	go func() { finished <- command.Wait() }()
+	t.Cleanup(func() { _ = command.Process.Kill() })
+
+	pid := int32(command.Process.Pid)
+	handle, err := process.NewProcess(pid)
+	if err != nil {
+		t.Fatalf("process.NewProcess() error = %v", err)
+	}
+	createTime, err := handle.CreateTime()
+	if err != nil {
+		t.Fatalf("CreateTime() error = %v", err)
+	}
+	startTime := time.UnixMilli(createTime)
+	signaler := OSProcessSignaler{}
+
+	for name, stale := range map[string]time.Time{"reused pid": startTime.Add(time.Second), "unknown": {}} {
+		if err = signaler.Signal(pid, stale, syscall.SIGTERM); !errors.Is(err, errProcessChanged) {
+			t.Errorf("%s: Signal() error = %v, want errProcessChanged", name, err)
+		}
+	}
+	select {
+	case <-finished:
+		t.Fatal("process was signalled despite a start time mismatch")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err = signaler.Signal(pid, startTime, syscall.SIGTERM); err != nil {
+		t.Fatalf("Signal() error = %v", err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("process did not receive the signal")
+	}
+
+	if err = signaler.Signal(pid, startTime, syscall.SIGTERM); !errors.Is(err, errProcessChanged) {
+		t.Errorf("Signal() after exit error = %v, want errProcessChanged", err)
+	}
+}
+
+func TestStripControlCharactersRemovesFormatCharacters(t *testing.T) {
+	const input = "safe\u202edr-mr\u2066x\u200by\ufeffz\u2028a\u2029b\u0085c"
+	if got, want := stripControlCharacters(input), "safe dr-mr x y z a b c"; got != want {
+		t.Fatalf("stripControlCharacters() = %q, want %q", got, want)
+	}
+}
+
+func TestDisplayedFieldsDropControlCharacters(t *testing.T) {
+	info, err := getProcessInfo(
+		MockProcessHandle{user: "bo\x1b[2Jb", cmdline: "cmd"},
+		&StaticInfo{},
+		nil,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("getProcessInfo() error = %v", err)
+	}
+	if strings.ContainsRune(info.User, '\x1b') {
+		t.Errorf("User = %q, want no escape byte", info.User)
+	}
+
+	state := &State{
+		static:  StaticInfo{HostMemTotalGB: 16},
+		dynamic: DynamicInfo{StorageUsage: []StorageUsage{{Path: "/m\x1b[2Jnt"}}},
+	}
+	state.dynamic.NetworkUsage = []NetworkUsage{{Name: "et\x1b[2Jh0"}}
+	state.dynamic.DiskIOUsage = []DiskIOUsage{{Name: "sd\x1b[2Ja"}}
+	if text := onceText(state); strings.ContainsRune(text, '\x1b') {
+		t.Errorf("once text contains an escape byte: %q", text)
 	}
 }
 
@@ -205,5 +264,66 @@ func TestStorageSkipsSingleFileMounts(t *testing.T) {
 	}
 	if got := strings.Join(paths, ","); got != "/data,/unreadable" {
 		t.Fatalf("mounts = %q, want /data,/unreadable", got)
+	}
+}
+
+func TestURLTagsAreShownLiterally(t *testing.T) {
+	payloads := []string{
+		"[:::https://evil.example/x]sudo apt update",
+		"[red::b:https://evil.example/?a=b%20c]text",
+		"[:::mailto:a@b.example]text",
+		"[::b:https://evil.example/x",
+		"trailing bracket [",
+		"[[nested]] [abc[]",
+		"[\"region\"]text",
+		"[#ff0000]text",
+	}
+	for _, payload := range payloads {
+		t.Run(payload, func(t *testing.T) {
+			state := &State{
+				ui:      UIState{ProcessSort: SortByCPU},
+				dynamic: DynamicInfo{Processes: []ProcessInfo{{PID: 1, User: "root", Command: payload}}},
+			}
+			table := configureProcessTable(tview.NewTable())
+			updateProcessTable(table, state)
+			assertOnScreen(t, drawOnScreen(t, table), payload)
+
+			cell := table.GetCell(1, processCommandColumn)
+			if got := plainText(cell.Text); got != payload {
+				t.Errorf("plainText() = %q, want %q", got, payload)
+			}
+
+			screen := tcell.NewSimulationScreen("UTF-8")
+			if err := screen.Init(); err != nil {
+				t.Fatalf("screen.Init() error = %v", err)
+			}
+			defer screen.Fini()
+			screen.SetSize(120, 30)
+			table.SetRect(0, 0, 120, 30)
+			table.Draw(screen)
+			screen.Show()
+			for _, cellContent := range cellsWithLinks(screen) {
+				t.Errorf("cell has a hyperlink: %q", cellContent)
+			}
+		})
+	}
+}
+
+func cellsWithLinks(screen tcell.SimulationScreen) []string {
+	cells, _, _ := screen.GetContents()
+	var links []string
+	for _, cell := range cells {
+		if cell.Style != cell.Style.Url("") {
+			links = append(links, string(cell.Runes))
+		}
+	}
+	return links
+}
+
+func TestPlainTextWidthCountsBracketsAsText(t *testing.T) {
+	for _, value := range []string{"[:::https://evil.example/x]", "[red]", "plain", "[", "]"} {
+		if got := plainTextWidth(value); got != len(value) {
+			t.Errorf("plainTextWidth(%q) = %d, want %d", value, got, len(value))
+		}
 	}
 }

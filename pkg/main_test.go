@@ -179,7 +179,7 @@ type signalCall struct {
 	signal os.Signal
 }
 
-func (mps *MockProcessSignaler) Signal(pid int32, signal os.Signal) error {
+func (mps *MockProcessSignaler) Signal(pid int32, _ time.Time, signal os.Signal) error {
 	mps.calls = append(mps.calls, signalCall{pid: pid, signal: signal})
 	return mps.err
 }
@@ -1086,7 +1086,7 @@ func TestSelectedProcessUsesPreparedRows(t *testing.T) {
 func TestSendProcessSignal(t *testing.T) {
 	pages := tview.NewPages()
 	signaler := &MockProcessSignaler{}
-	sendProcessSignal(pages, signaler, 123, os.Interrupt)
+	sendProcessSignal(pages, signaler, ProcessInfo{PID: 123}, os.Interrupt)
 
 	if len(signaler.calls) != 1 || signaler.calls[0].pid != 123 || signaler.calls[0].signal != os.Interrupt {
 		t.Fatalf("Expected signal call, got %+v", signaler.calls)

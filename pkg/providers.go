@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"time"
@@ -85,9 +86,13 @@ type ProcessProvider interface {
 	Processes() ([]ProcessHandle, error)
 }
 
+// errProcessChanged reports that a PID no longer belongs to the expected process.
+var errProcessChanged = errors.New("process is no longer running")
+
 // ProcessSignaler sends signals to operating-system processes.
 type ProcessSignaler interface {
-	Signal(pid int32, signal os.Signal) error
+	// Signal signals the process only if it is still the one that started at startTime.
+	Signal(pid int32, startTime time.Time, signal os.Signal) error
 }
 
 // HostMetricsProvider exposes host CPU and memory metrics.
@@ -142,12 +147,33 @@ func (p gopsutilProcessHandle) ParentPID() (int32, error) {
 // OSProcessSignaler sends a signal to a process by PID.
 type OSProcessSignaler struct{}
 
-func (s OSProcessSignaler) Signal(pid int32, signal os.Signal) error {
+// Signal opens the process first. On Linux the handle is a pidfd, so the start time check
+// below applies to the exact process that receives the signal, even if the PID is reused.
+func (s OSProcessSignaler) Signal(pid int32, startTime time.Time, signal os.Signal) error {
 	proc, err := os.FindProcess(int(pid))
 	if err != nil {
-		return err
+		return errProcessChanged
 	}
-	return proc.Signal(signal)
+	defer func() { _ = proc.Release() }()
+
+	current, err := process.NewProcess(pid)
+	if err != nil {
+		return errProcessChanged
+	}
+	createTime, err := current.CreateTime()
+	if err != nil || startTime.IsZero() || createTime != startTime.UnixMilli() {
+		return errProcessChanged
+	}
+	if err = proc.Signal(signal); errors.Is(err, os.ErrProcessDone) {
+		return errProcessChanged
+	}
+	return err
+}
+
+// useStableProcessStartTimes keeps process start times constant during a run. Inside containers
+// gopsutil derives boot time from the clock and uptime, which can differ by a second between reads.
+func useStableProcessStartTimes() {
+	process.EnableBootTimeCache(true)
 }
 
 // OSHostMetricsProvider reads host metrics through gopsutil.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -276,58 +277,37 @@ func showSignalDialog(pages *tview.Pages, state *State, table *tview.Table, sign
 	showModal(pages, "signal", text, []string{signalTermLabel, signalKillLabel, "Cancel"}, func(_ int, label string) {
 		switch label {
 		case signalTermLabel:
-			signalIfUnchanged(pages, state, signaler, process, syscall.SIGTERM)
+			sendProcessSignal(pages, signaler, process, syscall.SIGTERM)
 		case signalKillLabel:
-			confirmSIGKILL(pages, state, signaler, process)
+			confirmSIGKILL(pages, signaler, process)
 		}
 	})
 }
 
-func confirmSIGKILL(pages *tview.Pages, state *State, signaler ProcessSignaler, process ProcessInfo) {
+func confirmSIGKILL(pages *tview.Pages, signaler ProcessSignaler, process ProcessInfo) {
 	text := fmt.Sprintf("Really send SIGKILL to PID %d?\n\nThis cannot be handled by the process.", process.PID)
 	showModal(pages, "signal-confirm", text, []string{"Kill", "Cancel"}, func(_ int, label string) {
 		if label == "Kill" {
-			signalIfUnchanged(pages, state, signaler, process, syscall.SIGKILL)
+			sendProcessSignal(pages, signaler, process, syscall.SIGKILL)
 		}
 	})
 }
 
-// signalIfUnchanged re-checks the process because the PID may have been reused while a dialog was open.
-func signalIfUnchanged(
-	pages *tview.Pages,
-	state *State,
-	signaler ProcessSignaler,
-	process ProcessInfo,
-	signal os.Signal,
-) {
-	if !isProcessUnchanged(state, process) {
-		showMessage(pages, fmt.Sprintf("PID %d is no longer running", process.PID))
-		return
-	}
-	sendProcessSignal(pages, signaler, process.PID, signal)
-}
-
-func isProcessUnchanged(state *State, process ProcessInfo) bool {
-	state.dynamic.mu.Lock()
-	defer state.dynamic.mu.Unlock()
-	for _, current := range state.dynamic.Processes {
-		if current.PID == process.PID {
-			return current.StartTime.Equal(process.StartTime)
-		}
-	}
-	return false
-}
-
-func sendProcessSignal(pages *tview.Pages, signaler ProcessSignaler, pid int32, signal os.Signal) {
+func sendProcessSignal(pages *tview.Pages, signaler ProcessSignaler, process ProcessInfo, signal os.Signal) {
 	if signaler == nil {
 		showMessage(pages, "Process signaling is unavailable")
 		return
 	}
-	if err := signaler.Signal(pid, signal); err != nil {
-		showMessage(pages, fmt.Sprintf("Failed to send %s to PID %d: %v", signalLabel(signal), pid, err))
+	err := signaler.Signal(process.PID, process.StartTime, signal)
+	if errors.Is(err, errProcessChanged) {
+		showMessage(pages, fmt.Sprintf("PID %d is no longer running", process.PID))
 		return
 	}
-	showMessage(pages, fmt.Sprintf("Sent %s to PID %d", signalLabel(signal), pid))
+	if err != nil {
+		showMessage(pages, fmt.Sprintf("Failed to send %s to PID %d: %v", signalLabel(signal), process.PID, err))
+		return
+	}
+	showMessage(pages, fmt.Sprintf("Sent %s to PID %d", signalLabel(signal), process.PID))
 }
 
 func showMessage(pages *tview.Pages, text string) {
@@ -342,7 +322,7 @@ func showModal(
 	done func(buttonIndex int, buttonLabel string),
 ) {
 	modal := tview.NewModal().
-		SetText(tview.Escape(text)).
+		SetText(escapeText(text)).
 		AddButtons(buttons).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			pages.RemovePage(name)

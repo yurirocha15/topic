@@ -412,12 +412,12 @@ func writeMetricLine(
 	}
 
 	builder.WriteString(themeLabelTag)
-	builder.WriteString(tview.Escape(padPlainText(label, labelWidth)))
+	builder.WriteString(displayText(padPlainText(label, labelWidth)))
 	builder.WriteString(themeResetTag)
 	builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
 	if value != "" {
 		builder.WriteString(valueTag)
-		builder.WriteString(tview.Escape(value))
+		builder.WriteString(displayText(value))
 		builder.WriteString(themeResetTag)
 	}
 	if trend != "" {
@@ -606,7 +606,7 @@ func formatAlignedBar(bar BarData, barWidth int, maxLabelWidth int, maxInfoWidth
 
 	var builder strings.Builder
 	builder.WriteString(themeLabelTag)
-	builder.WriteString(tview.Escape(label))
+	builder.WriteString(displayText(label))
 	builder.WriteString(themeResetTag)
 	builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
 	builder.WriteString(formatUsagePercent(bar.Percent))
@@ -615,7 +615,7 @@ func formatAlignedBar(bar BarData, barWidth int, maxLabelWidth int, maxInfoWidth
 	if maxInfoWidth > 0 {
 		builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
 		builder.WriteString(themeMutedTag)
-		builder.WriteString(tview.Escape(info))
+		builder.WriteString(displayText(info))
 		builder.WriteString(themeResetTag)
 	}
 
@@ -657,9 +657,20 @@ func padPlainText(value string, width int) string {
 	return value + strings.Repeat(" ", padding)
 }
 
+// escapeText makes untrusted text literal for tview. tview.Escape leaves URL tags such as
+// [:::https://example.com] active, so a no-op tag follows every bracket to stop any tag from forming.
+func escapeText(text string) string {
+	return strings.ReplaceAll(text, "[", "[[::]")
+}
+
+// displayText prepares single-line untrusted text for tagged output.
+func displayText(text string) string {
+	return escapeText(stripControlCharacters(text))
+}
+
 // plainTextWidth measures unescaped text, in which brackets are not display tags.
 func plainTextWidth(value string) int {
-	return tview.TaggedStringWidth(tview.Escape(value))
+	return tview.TaggedStringWidth(escapeText(value))
 }
 
 func visibleRuneCount(value string) int {

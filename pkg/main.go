@@ -124,6 +124,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
+	useStableProcessStartTimes()
 
 	fileReader := OSFileReader{}
 	cmdRunner := OSCommandRunner{Context: ctx, Timeout: commandTimeout}
@@ -372,7 +373,7 @@ func filterStatusText(ui UIState) string {
 	if len([]rune(filter)) > maxFilterStatusWidth {
 		filter = string([]rune(filter)[:maxFilterStatusWidth-1]) + "…"
 	}
-	return themeAttentionTag + tview.Escape(filter) + themeResetTag
+	return themeAttentionTag + escapeText(filter) + themeResetTag
 }
 
 func sortStatusText(ui UIState) string {

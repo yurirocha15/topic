@@ -131,7 +131,7 @@ func updateProcessTable(table *tview.Table, state *State) {
 		table.RemoveRow(row)
 	}
 
-	table.SetTitle(tview.Escape(processTableTitle(ui, len(processes), totalProcesses)))
+	table.SetTitle(escapeText(processTableTitle(ui, len(processes), totalProcesses)))
 }
 
 func setTableCell(
@@ -144,7 +144,7 @@ func setTableCell(
 	expansion int,
 ) {
 	cell := table.GetCell(row, column)
-	cell.SetText(tview.Escape(text)).
+	cell.SetText(escapeText(text)).
 		SetTextColor(color).
 		SetAlign(tview.AlignLeft).
 		SetSelectable(selectable).
@@ -530,10 +530,11 @@ func resolveProcessCommand(p ProcessHandle) (string, error) {
 	return "[" + stripControlCharacters(name) + "]", nil
 }
 
-// stripControlCharacters keeps any process from sending terminal escape sequences through its command line.
+// stripControlCharacters keeps a process from sending terminal escape sequences or using
+// bidirectional and other format characters to disguise what it displays.
 func stripControlCharacters(text string) string {
 	return strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) {
+		if unicode.IsControl(character) || unicode.In(character, unicode.Cf, unicode.Zl, unicode.Zp) {
 			return ' '
 		}
 		return character
@@ -570,6 +571,7 @@ func getProcessInfo(
 	if err != nil {
 		user = "n/a"
 	}
+	user = stripControlCharacters(user)
 	cmdline, err := resolveProcessCommand(p)
 	if err != nil {
 		return ProcessInfo{}, err
