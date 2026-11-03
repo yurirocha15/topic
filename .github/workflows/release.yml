@@ -67,14 +67,18 @@ jobs:
         working-directory: ./pkg
         run: go test ./...
 
-  # Builds the binary for each architecture.
+  # Builds and runs the binary on a native runner for each architecture.
   build:
     name: Build for Linux (${{ matrix.arch }})
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-26.04-arm
 
     steps:
       - name: Checkout code
@@ -101,6 +105,19 @@ jobs:
           # -ldflags="-s -w" strips the binary to make it smaller.
           # -X main.Version=... injects the Git tag as a version string.
           go build -v -ldflags="-s -w -X main.Version=${TAG}" -o "../topic-${GOOS}-${GOARCH}" .
+
+      - name: Run the built binary
+        env:
+          BINARY: ./topic-linux-${{ matrix.arch }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          version="$("$BINARY" --version)"
+          if [[ "$version" != "topic $TAG" ]]; then
+            echo "::error::Expected version 'topic $TAG', got '$version'."
+            exit 1
+          fi
+          "$BINARY" --once --json > snapshot.json
+          python3 -c 'import json, sys; json.load(open(sys.argv[1]))' snapshot.json
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
