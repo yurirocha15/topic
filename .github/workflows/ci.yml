@@ -54,3 +54,76 @@ jobs:
 
       - name: Check for known vulnerabilities
         run: make vuln
+
+  e2e-docker:
+    name: Docker E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'pkg/go.mod'
+          cache-dependency-path: 'pkg/go.sum'
+
+      - name: Validate Docker metadata inside a container
+        run: make e2e-docker
+
+  e2e-kubernetes:
+    name: Kubernetes E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'pkg/go.mod'
+          cache-dependency-path: 'pkg/go.sum'
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          # The E2E script loads its image into kind's default cluster name.
+          cluster_name: kind
+
+      - name: Validate Kubernetes metadata inside a pod
+        run: make e2e-kubernetes
+
+  arm64:
+    name: Test on arm64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'pkg/go.mod'
+          cache-dependency-path: 'pkg/go.sum'
+
+      - name: Run tests
+        run: make test
+
+      - name: Run integration tests
+        run: make test-integrations
+
+      - name: Validate Docker metadata inside a container
+        run: make e2e-docker
+
+      - name: Run the latest published arm64 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="$(mktemp -d)"
+          gh release download --repo "$GITHUB_REPOSITORY" --dir "$dir" --pattern topic-linux-arm64 --pattern SHA256SUMS
+          cd "$dir"
+          sha256sum --check --ignore-missing SHA256SUMS
+          chmod +x topic-linux-arm64
+          ./topic-linux-arm64 --version
+          ./topic-linux-arm64 --once --json > snapshot.json
+          python3 -c 'import json, sys; json.load(open(sys.argv[1]))' snapshot.json
