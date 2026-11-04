@@ -299,6 +299,8 @@ type State struct {
 	processCPU processCPUTracker
 	procfs     *procfsReader
 	gpuStream  *gpuUsageStream
+	// networkShown is the interface the network row showed last, kept so the row stays steady.
+	networkShown string
 
 	// followPID is the process the user last highlighted, or 0 when the highlight stays on its row.
 	// It is atomic because table callbacks set it while a render may hold the state lock.

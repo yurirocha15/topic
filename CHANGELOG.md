@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - CPU, memory, and GPU history now use a fixed 0–100% scale, so a steady 20% draws as low blocks instead of full ones. History starts empty and fills as samples arrive, instead of repeating the first reading 30 times. Network and disk I/O history still scale to their own peak.
 - Memory and PID alerts now use the same levels as the colors: a warning from 70% (gold) and a critical alert from 90% (red). They were 85% and 95%, so a red bar could come with only a warning. The pressure row also turns gold when it raises an alert.
 - Memory, disk, and GPU sizes are labelled GiB, because they are measured in 1024-based units. They were labelled GB, which made a 2 GiB container limit look different from what Docker and Kubernetes report.
+- The network row stays on one interface instead of jumping to whichever was busiest that second. It switches only when another interface carries more than twice the traffic, shows the default-route interface when the network is idle, and its history now follows the interface it names.
 
 ### Changed
 

@@ -3,6 +3,8 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -68,6 +70,10 @@ func updateNetworkUsageWithProvider(state *State, provider NetworkProvider) []Ne
 	})
 	state.prevNetwork = current
 	state.prevNetTime = now
+	usage = orderShownNetworkFirst(usage, state.networkShown, defaultRouteInterface(procRoot))
+	if len(usage) > 0 {
+		state.networkShown = usage[0].Name
+	}
 	return usage
 }
 
@@ -315,7 +321,7 @@ func updateMetricsHistory(history *MetricsHistory, staticInfo StaticInfo, dynami
 	}
 	history.Memory.Add(memPercent)
 	history.GPU.Add(maxGPUUtilization(dynamic.LiveGPUUsage))
-	history.Network.Add(totalNetworkRate(dynamic.NetworkUsage) / bytesPerSecondToMiBSecond)
+	history.Network.Add(shownNetworkRate(dynamic.NetworkUsage) / bytesPerSecondToMiBSecond)
 	history.DiskIO.Add(totalDiskIORate(dynamic.DiskIOUsage) / bytesPerSecondToMiBSecond)
 }
 
@@ -394,12 +400,59 @@ func maxGPUUtilization(usage []GPUUsage) float64 {
 	return maxValue
 }
 
-func totalNetworkRate(usage []NetworkUsage) float64 {
-	total := 0.0
-	for _, network := range usage {
-		total += network.RXBytesPerSec + network.TXBytesPerSec
+// shownNetworkRate is the traffic of the interface the network row shows, which comes first.
+func shownNetworkRate(usage []NetworkUsage) float64 {
+	if len(usage) == 0 {
+		return 0
 	}
-	return total
+	return networkRate(usage[0])
+}
+
+func networkRate(network NetworkUsage) float64 {
+	return network.RXBytesPerSec + network.TXBytesPerSec
+}
+
+// networkSwitchFactor is how many times busier another interface must be before the network row
+// stops showing the current one, so the row does not flicker between interfaces.
+const networkSwitchFactor = 2
+
+// orderShownNetworkFirst moves the interface the network row should show to the front of usage,
+// which is sorted busiest first. It keeps the previously shown interface unless another carries
+// more than networkSwitchFactor times its traffic, and shows the default route when all are idle.
+func orderShownNetworkFirst(usage []NetworkUsage, previous string, defaultRoute string) []NetworkUsage {
+	if len(usage) == 0 {
+		return usage
+	}
+	busiest := networkRate(usage[0])
+	shown := usage[0].Name
+	switch previousIndex := slices.IndexFunc(usage, func(n NetworkUsage) bool { return n.Name == previous }); {
+	case previousIndex >= 0 && busiest <= networkSwitchFactor*networkRate(usage[previousIndex]):
+		shown = previous
+	case previousIndex < 0 && busiest == 0 && slices.ContainsFunc(usage, func(n NetworkUsage) bool {
+		return n.Name == defaultRoute
+	}):
+		shown = defaultRoute
+	}
+	index := slices.IndexFunc(usage, func(n NetworkUsage) bool { return n.Name == shown })
+	shownUsage := usage[index]
+	copy(usage[1:index+1], usage[:index])
+	usage[0] = shownUsage
+	return usage
+}
+
+// defaultRouteInterface returns the interface of the default route in <root>/net/route, or "".
+func defaultRouteInterface(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, "net", "route"))
+	if err != nil {
+		return ""
+	}
+	for line := range strings.Lines(string(data)) {
+		fields := strings.Fields(line)
+		if len(fields) > 1 && fields[1] == "00000000" {
+			return fields[0]
+		}
+	}
+	return ""
 }
 
 func totalDiskIORate(usage []DiskIOUsage) float64 {
