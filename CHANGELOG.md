@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - `%GPUMEM` now shows how much of its GPU's memory each process uses. It previously showed how busy the GPU memory bus was, so a process holding gigabytes of GPU memory could show 0%. The process details also show the amount in MB.
+- Disks mounted at paths that contain "loop", such as `/mnt/loopback`, are no longer hidden from the storage list. Only loop devices are hidden.
 
 ## [0.0.4] - 2026-10-31
 

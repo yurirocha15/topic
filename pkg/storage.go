@@ -13,8 +13,8 @@ func getStaticStorageInfoWithProvider(provider StorageProvider, stater Stater) (
 
 	mounts := make([]StorageMount, 0, len(partitions))
 	for _, partition := range partitions {
-		// Skip virtual filesystems and temporary mounts
-		if shouldSkipFilesystem(partition.Fstype, partition.Mountpoint) {
+		// Skip virtual filesystems, temporary mounts, and loop devices such as snap images
+		if shouldSkipFilesystem(partition.Fstype, partition.Mountpoint) || isLoopDevice(partition.Device) {
 			continue
 		}
 
@@ -77,12 +77,14 @@ func shouldSkipFilesystem(fstype, mountpoint string) bool {
 		return true
 	}
 
-	// Skip loop devices (often used by snap packages and other virtual filesystems)
-	if strings.Contains(mountpoint, "/loop") || strings.HasPrefix(mountpoint, "/snap/") {
-		return true
-	}
+	// Skip snap package mounts
+	return strings.HasPrefix(mountpoint, "/snap/")
+}
 
-	return false
+// isLoopDevice reports whether device is a loop block device such as /dev/loop3 or /dev/loop0p1.
+func isLoopDevice(device string) bool {
+	number, ok := strings.CutPrefix(device, "/dev/loop")
+	return ok && number != "" && number[0] >= '0' && number[0] <= '9'
 }
 
 func updateStorageUsageWithProvider(storageMounts []StorageMount, provider StorageProvider) []StorageUsage {
