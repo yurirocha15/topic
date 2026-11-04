@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The highlight in the process table now stays on the process you select instead of moving to whatever process lands on that row after a refresh.
 - Signal dialogs open with `Cancel` selected, so pressing `Enter` no longer sends `SIGTERM` or `SIGKILL` by accident. The `SIGKILL` confirmation also shows the command.
 - When filtering shortens the process table, a visible process stays selected instead of `Enter` and `k` reporting "No process selected".
+- The mouse now works in the process table and dialogs, as the help already described.
 
 ## [0.0.4] - 2026-10-31
 

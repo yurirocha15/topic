@@ -269,7 +269,7 @@ func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state
 		}
 	}()
 
-	return app.SetRoot(pages, true).Run()
+	return app.SetRoot(pages, true).EnableMouse(true).Run()
 }
 
 func configureProcessTable(table *tview.Table) *tview.Table {
