@@ -52,6 +52,8 @@ func updateProcessTable(table *tview.Table, state *State) {
 		defer state.dynamic.mu.Unlock()
 	}
 
+	previousRow, _ := table.GetSelection()
+
 	// --- Create Header ---
 	headers := processTableHeaders(ui)
 	for i, header := range headers {
@@ -130,8 +132,40 @@ func updateProcessTable(table *tview.Table, state *State) {
 	for row := table.GetRowCount() - 1; row > len(processes); row-- {
 		table.RemoveRow(row)
 	}
+	restoreProcessSelection(table, state, processes, previousRow)
 
 	table.SetTitle(escapeText(processTableTitle(ui, len(processes), totalProcesses)))
+}
+
+// trackProcessSelection remembers the process the user highlights with the keyboard or mouse.
+func trackProcessSelection(table *tview.Table, state *State) {
+	table.SetSelectionChangedFunc(func(row, _ int) {
+		if pid, ok := table.GetCell(row, processPIDColumn).GetReference().(int32); ok {
+			state.followPID.Store(pid)
+		}
+	})
+}
+
+// restoreProcessSelection moves the highlight to the row of the process the user picked. Until the user
+// picks one, or after it exits or is filtered out, the highlight stays on its row, moved up to the last
+// row if the table got shorter.
+func restoreProcessSelection(table *tview.Table, state *State, processes []ProcessInfo, previousRow int) {
+	if len(processes) == 0 {
+		return
+	}
+	if followPID := state.followPID.Load(); followPID != 0 {
+		for index, process := range processes {
+			if process.PID == followPID {
+				table.Select(index+1, 0)
+				return
+			}
+		}
+	}
+	if previousRow > len(processes) {
+		table.Select(len(processes), 0)
+	}
+	// Moving the highlight here is not a choice by the user, so stop following
+	state.followPID.Store(0)
 }
 
 func setTableCell(

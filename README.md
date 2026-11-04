@@ -101,7 +101,7 @@ topic --version          # print the version and exit
 #### Controls
 
 * **Quit:** `q` or `Ctrl+C`
-* **Navigate:** Use the arrow keys (`←`, `↑`, `→`, `↓`) or mouse to scroll through the process list.
+* **Navigate:** Use the arrow keys (`←`, `↑`, `→`, `↓`) or the mouse to move through the process list. Once you select a process, the highlight follows it when the list re-sorts.
 * **Filter mode:** `/` to enter, type to filter, `Ctrl+U` to clear, `Esc` to leave.
 * **Sort mode:** `s` to enter, `←`/`→` to choose a column, `↑`/`↓` to choose direction, `Esc` to leave.
 * **Process details:** `Enter`

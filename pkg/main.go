@@ -209,6 +209,7 @@ func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state
 
 	// Bottom panel for processes
 	processTable := configureProcessTable(tview.NewTable())
+	trackProcessSelection(processTable, state)
 
 	// --- Create the Layout ---
 

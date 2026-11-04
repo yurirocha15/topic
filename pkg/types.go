@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -293,6 +294,10 @@ type State struct {
 	prevDiskTime time.Time
 
 	processCPU processCPUTracker
+
+	// followPID is the process the user last highlighted, or 0 when the highlight stays on its row.
+	// It is atomic because table callbacks set it while a render may hold the state lock.
+	followPID atomic.Int32
 
 	prevCgroupEvents *CgroupEvents
 	lastOOMKillTime  time.Time
