@@ -249,7 +249,7 @@ a             toggle ASCII art
 Enter         process details
 k             signal selected process
 ?             this help`
-	showModal(pages, "help", text, []string{"OK"}, nil)
+	showModal(pages, "help", text, []string{"OK"}, 0, nil)
 }
 
 func showProcessDetails(pages *tview.Pages, state *State, table *tview.Table) {
@@ -258,10 +258,7 @@ func showProcessDetails(pages *tview.Pages, state *State, table *tview.Table) {
 		showMessage(pages, "No process selected")
 		return
 	}
-	updateUIState(state, func(ui *UIState) {
-		ui.SelectedPID = process.PID
-	})
-	showModal(pages, "process-details", processDetailsText(process), []string{"OK"}, nil)
+	showModal(pages, "process-details", processDetailsText(process), []string{"OK"}, 0, nil)
 }
 
 func showSignalDialog(pages *tview.Pages, state *State, table *tview.Table, signaler ProcessSignaler) {
@@ -270,11 +267,10 @@ func showSignalDialog(pages *tview.Pages, state *State, table *tview.Table, sign
 		showMessage(pages, "No process selected")
 		return
 	}
-	updateUIState(state, func(ui *UIState) {
-		ui.SelectedPID = process.PID
-	})
 	text := fmt.Sprintf("Send a signal to PID %d?\n\n%s", process.PID, process.Command)
-	showModal(pages, "signal", text, []string{signalTermLabel, signalKillLabel, "Cancel"}, func(_ int, label string) {
+	buttons := []string{signalTermLabel, signalKillLabel, cancelLabel}
+	// Cancel has focus, so a stray Enter never sends a signal
+	showModal(pages, "signal", text, buttons, len(buttons)-1, func(_ int, label string) {
 		switch label {
 		case signalTermLabel:
 			sendProcessSignal(pages, signaler, process, syscall.SIGTERM)
@@ -285,9 +281,14 @@ func showSignalDialog(pages *tview.Pages, state *State, table *tview.Table, sign
 }
 
 func confirmSIGKILL(pages *tview.Pages, signaler ProcessSignaler, process ProcessInfo) {
-	text := fmt.Sprintf("Really send SIGKILL to PID %d?\n\nThis cannot be handled by the process.", process.PID)
-	showModal(pages, "signal-confirm", text, []string{"Kill", "Cancel"}, func(_ int, label string) {
-		if label == "Kill" {
+	text := fmt.Sprintf(
+		"Really send SIGKILL to PID %d?\n\n%s\n\nThis cannot be handled by the process.",
+		process.PID,
+		process.Command,
+	)
+	buttons := []string{killLabel, cancelLabel}
+	showModal(pages, "signal-confirm", text, buttons, len(buttons)-1, func(_ int, label string) {
+		if label == killLabel {
 			sendProcessSignal(pages, signaler, process, syscall.SIGKILL)
 		}
 	})
@@ -311,7 +312,7 @@ func sendProcessSignal(pages *tview.Pages, signaler ProcessSignaler, process Pro
 }
 
 func showMessage(pages *tview.Pages, text string) {
-	showModal(pages, "message", text, []string{"OK"}, nil)
+	showModal(pages, "message", text, []string{"OK"}, 0, nil)
 }
 
 func showModal(
@@ -319,11 +320,13 @@ func showModal(
 	name string,
 	text string,
 	buttons []string,
+	focusedButton int,
 	done func(buttonIndex int, buttonLabel string),
 ) {
 	modal := tview.NewModal().
 		SetText(escapeText(text)).
 		AddButtons(buttons).
+		SetFocus(focusedButton).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			pages.RemovePage(name)
 			if done != nil {

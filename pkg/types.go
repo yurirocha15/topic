@@ -226,7 +226,6 @@ type UIState struct {
 	SortMode      bool
 	Paused        bool
 	TreeMode      bool
-	SelectedPID   int32
 	HideASCIIArt  bool
 }
 

@@ -93,6 +93,8 @@ const (
 	nvidiaSMIPMonUsageMemory  = "um"
 	signalTermLabel           = "SIGTERM"
 	signalKillLabel           = "SIGKILL"
+	killLabel                 = "Kill"
+	cancelLabel               = "Cancel"
 	signalIntLabel            = "SIGINT"
 	metricCPULabel            = "CPU"
 	metricMemoryLabel         = "MEMORY"

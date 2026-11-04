@@ -105,7 +105,7 @@ topic --version          # print the version and exit
 * **Filter mode:** `/` to enter, type to filter, `Ctrl+U` to clear, `Esc` to leave.
 * **Sort mode:** `s` to enter, `←`/`→` to choose a column, `↑`/`↓` to choose direction, `Esc` to leave.
 * **Process details:** `Enter`
-* **Signal process:** `k` (`Enter` and `k` act on the PID shown in the highlighted row)
+* **Signal process:** `k` (`Enter` and `k` act on the PID shown in the highlighted row). `Cancel` is selected when the dialog opens; use `←`/`→` to choose `SIGTERM` or `SIGKILL`.
 * **Pause refresh:** `p`
 * **Tree view:** `t` (shows process tree order instead of the selected sort)
 * **Toggle logo:** `a`

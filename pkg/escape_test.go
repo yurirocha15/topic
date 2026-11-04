@@ -69,7 +69,7 @@ func TestProcessTableTitleShowsUntrustedTextLiterally(t *testing.T) {
 func TestModalsShowUntrustedTextLiterally(t *testing.T) {
 	process := ProcessInfo{PID: 1, User: "[blue]bob", Command: testSpoofCommand, GPUIndex: -1}
 	pages := tview.NewPages()
-	showModal(pages, "details", processDetailsText(process), []string{"OK"}, nil)
+	showModal(pages, "details", processDetailsText(process), []string{"OK"}, 0, nil)
 
 	assertOnScreen(t, drawOnScreen(t, pages), testSpoofCommand, "[blue]bob")
 }
