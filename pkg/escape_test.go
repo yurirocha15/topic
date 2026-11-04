@@ -104,9 +104,10 @@ func TestStorageLabelKeepsValidUTF8(t *testing.T) {
 	if len(bars) != 1 || !utf8.ValidString(bars[0].Label) {
 		t.Fatalf("label = %q, want valid UTF-8", bars[0].Label)
 	}
-	const wantLabel = "DISK ...レージ領域/バックアップ"
-	if bars[0].Label != wantLabel {
-		t.Errorf("label = %q, want %q", bars[0].Label, wantLabel)
+	drawn := fitBarLabel(bars[0], maxMetricLabelWidth)
+	const wantLabel = "DISK …バックアップ" // the six wide characters fill the 12 cells after "DISK …"
+	if drawn != wantLabel || !utf8.ValidString(drawn) {
+		t.Errorf("drawn label = %q, want %q", drawn, wantLabel)
 	}
 }
 

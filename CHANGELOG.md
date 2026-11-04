@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The sort arrow now shows the real direction: `↓` is high to low and `↑` is low to high for every column. In sort mode, `↓` and `↑` choose that direction.
 - The dashboard is laid out for the terminal's real size as soon as it starts and right after a resize. The first screen previously had no labels, and a resized screen kept the old layout until the next refresh.
 - Wide characters, such as Japanese or Chinese text in mount paths and interface names, no longer push rows out of alignment or past the edge of the panel.
+- Long mount paths are shortened once, from the left, so the end of the path stays visible, as in `DISK …models/llama`. Two mounts with a long shared beginning were previously cut down to the same text.
 
 ### Changed
 

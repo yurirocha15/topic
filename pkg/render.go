@@ -171,17 +171,11 @@ func calculateStorageLabelsInfo(state *State) ([]string, []string, []float64) {
 func calculateStorageBars(state *State) []BarData {
 	bars := make([]BarData, 0, len(state.dynamic.StorageUsage))
 	for _, storage := range state.dynamic.StorageUsage {
-		// Shorten long mount paths for display
-		displayPath := storage.Path
-		if pathRunes := []rune(displayPath); len(pathRunes) > maxDisplayPathLength {
-			keptRunes := pathRunes[len(pathRunes)-maxDisplayPathLength+len(displayPathPrefix):]
-			displayPath = displayPathPrefix + string(keptRunes)
-		}
-
-		label := fmt.Sprintf("DISK %s", displayPath)
 		info := fmt.Sprintf("%.2f / %.2f GB", storage.UsedGB, storage.UsedGB+storage.FreeGB)
-
-		bars = append(bars, newBarData(label, storage.UsedPercent, info))
+		bar := newBarData(storageLabelPrefix+storage.Path, storage.UsedPercent, info)
+		// The end of a mount path tells mounts apart, so a long path is shortened from the left
+		bar.TailStart = len(storageLabelPrefix)
+		bars = append(bars, bar)
 	}
 	return bars
 }
@@ -602,7 +596,7 @@ func buildAlignedRow(
 }
 
 func formatAlignedBar(bar BarData, barWidth int, maxLabelWidth int, maxInfoWidth int, columnWidth int) string {
-	label := padPlainText(truncatePlainText(bar.Label, maxLabelWidth), maxLabelWidth)
+	label := padPlainText(fitBarLabel(bar, maxLabelWidth), maxLabelWidth)
 	info := padPlainText(truncatePlainText(bar.Info, maxInfoWidth), maxInfoWidth)
 
 	var builder strings.Builder
@@ -634,6 +628,41 @@ func formatUsagePercent(percent float64) string {
 		value = " 999+%"
 	}
 	return "[" + usageColorName(percent) + "]" + value + themeResetTag
+}
+
+// fitBarLabel shortens a label to width cells. A label with a TailStart keeps the text before it
+// and the end of the text after it, such as "DISK …models/llama".
+func fitBarLabel(bar BarData, width int) string {
+	if plainCellWidth(bar.Label) <= width || bar.TailStart <= 0 || bar.TailStart >= len(bar.Label) {
+		return truncatePlainText(bar.Label, width)
+	}
+	prefix, tail := bar.Label[:bar.TailStart], bar.Label[bar.TailStart:]
+	tailWidth := width - plainCellWidth(prefix) - plainCellWidth("…")
+	if tailWidth <= 0 {
+		return truncatePlainText(bar.Label, width)
+	}
+	return prefix + "…" + lastCells(tail, tailWidth)
+}
+
+// lastCells returns the end of text that fits in width cells, keeping whole characters.
+func lastCells(text string, width int) string {
+	var clusters []string
+	var widths []int
+	state := -1
+	for rest := text; rest != ""; {
+		var cluster string
+		var clusterWidth int
+		cluster, rest, clusterWidth, state = uniseg.FirstGraphemeClusterInString(rest, state)
+		clusters = append(clusters, cluster)
+		widths = append(widths, clusterWidth)
+	}
+	used := 0
+	start := len(clusters)
+	for start > 0 && used+widths[start-1] <= width {
+		start--
+		used += widths[start]
+	}
+	return strings.Join(clusters[start:], "")
 }
 
 // truncatePlainText shortens text to at most width terminal cells, ending it with "…" when cut.

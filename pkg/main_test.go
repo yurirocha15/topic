@@ -421,8 +421,8 @@ func TestStorageAndGPULabelInfo(t *testing.T) {
 	if labels[0] != "DISK /" || infos[0] != "10.00 / 100.00 GB" {
 		t.Fatalf("Unexpected root storage label/info: %q %q", labels[0], infos[0])
 	}
-	if !strings.Contains(labels[1], ".../for/storage") {
-		t.Fatalf("Expected long storage path to be truncated, got %q", labels[1])
+	if labels[1] != "DISK /very/long/path/for/storage" {
+		t.Fatalf("Expected the full storage path in the label, shortened only when drawn, got %q", labels[1])
 	}
 	if percentages[0] != 10 || percentages[1] != 75 {
 		t.Fatalf("Unexpected storage percentages: %v", percentages)

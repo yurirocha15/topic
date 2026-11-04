@@ -176,9 +176,12 @@ type BarLayout struct {
 type BarData struct {
 	Label      string
 	LabelWidth int
-	Percent    float64
-	Info       string
-	InfoWidth  int
+	// TailStart is the byte offset in Label after which a label that does not fit is shortened from
+	// the left, keeping its end. Zero shortens the label from the right.
+	TailStart int
+	Percent   float64
+	Info      string
+	InfoWidth int
 }
 
 // GPUProcessInfo holds usage data for a process on a GPU.
