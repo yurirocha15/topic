@@ -326,13 +326,34 @@ func processTableHeaders(ui UIState) []string {
 	}
 	sortIndex := processSortHeaderIndex(ui.ProcessSort)
 	if sortIndex >= 0 && sortIndex < len(headers) {
-		marker := "↓"
-		if ui.ReverseSort {
-			marker = "↑"
-		}
-		headers[sortIndex] += marker
+		headers[sortIndex] += sortDirectionMarker(ui)
 	}
 	return headers
+}
+
+// naturallyDescending reports whether a column sorts from high to low before it is reversed.
+// Usage columns put the busiest processes first; PID, user, and command sort A to Z.
+func naturallyDescending(column ProcessSortColumn) bool {
+	switch column {
+	case SortByCPU, SortByMemory, SortByGPU, SortByGPUMemory:
+		return true
+	case SortByPID, SortByUser, SortByCommand:
+		return false
+	default:
+		return true
+	}
+}
+
+func sortsDescending(ui UIState) bool {
+	return naturallyDescending(ui.ProcessSort) != ui.ReverseSort
+}
+
+// sortDirectionMarker is ↓ when the table runs from high to low and ↑ when it runs from low to high.
+func sortDirectionMarker(ui UIState) string {
+	if sortsDescending(ui) {
+		return "↓"
+	}
+	return "↑"
 }
 
 func selectedProcess(table *tview.Table, state *State) (ProcessInfo, bool) {

@@ -103,7 +103,7 @@ topic --version          # print the version and exit
 * **Quit:** `q` or `Ctrl+C`
 * **Navigate:** Use the arrow keys (`←`, `↑`, `→`, `↓`) or the mouse to move through the process list. Once you select a process, the highlight follows it when the list re-sorts.
 * **Filter mode:** `/` to enter, type to filter, `Ctrl+U` to clear, `Esc` to leave.
-* **Sort mode:** `s` to enter, `←`/`→` to choose a column, `↑`/`↓` to choose direction, `Esc` to leave.
+* **Sort mode:** `s` to enter, `←`/`→` to choose a column, `↓` for high to low or `↑` for low to high, `Esc` to leave.
 * **Process details:** `Enter`
 * **Signal process:** `k` (`Enter` and `k` act on the PID shown in the highlighted row). `Cancel` is selected when the dialog opens; use `←`/`→` to choose `SIGTERM` or `SIGKILL`.
 * **Pause refresh:** `p`

@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Signal dialogs open with `Cancel` selected, so pressing `Enter` no longer sends `SIGTERM` or `SIGKILL` by accident. The `SIGKILL` confirmation also shows the command.
 - When filtering shortens the process table, a visible process stays selected instead of `Enter` and `k` reporting "No process selected".
 - The mouse now works in the process table and dialogs, as the help already described.
+- The sort arrow now shows the real direction: `↓` is high to low and `↑` is low to high for every column. In sort mode, `↓` and `↑` choose that direction.
 
 ## [0.0.4] - 2026-10-31
 

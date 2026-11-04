@@ -379,11 +379,7 @@ func filterStatusText(ui UIState) string {
 }
 
 func sortStatusText(ui UIState) string {
-	direction := "↓"
-	if ui.ReverseSort {
-		direction = "↑"
-	}
-	return themeAccentTag + processSortColumnLabel(ui.ProcessSort) + direction + themeResetTag
+	return themeAccentTag + processSortColumnLabel(ui.ProcessSort) + sortDirectionMarker(ui) + themeResetTag
 }
 
 func processSortColumnLabel(column ProcessSortColumn) string {

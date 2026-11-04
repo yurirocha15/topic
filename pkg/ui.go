@@ -208,11 +208,11 @@ func handleSortInput(event *tcell.EventKey, state *State) {
 		})
 	case tcell.KeyUp:
 		updateUIState(state, func(ui *UIState) {
-			ui.ReverseSort = true
+			ui.ReverseSort = naturallyDescending(ui.ProcessSort)
 		})
 	case tcell.KeyDown:
 		updateUIState(state, func(ui *UIState) {
-			ui.ReverseSort = false
+			ui.ReverseSort = !naturallyDescending(ui.ProcessSort)
 		})
 	default:
 		return

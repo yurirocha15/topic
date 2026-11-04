@@ -1240,13 +1240,14 @@ func TestSortModeInputRouting(t *testing.T) {
 		t.Fatalf("Expected sort mode to move back from CPU to USER, got %v", state.ui.ProcessSort)
 	}
 
+	// USER sorts A to Z by default, so Down (descending) reverses it and Up restores it
 	handleInput(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone), state, app, pages, table, signaler)
-	if state.ui.ReverseSort {
-		t.Fatal("Expected Down to select ascending sort direction")
+	if !state.ui.ReverseSort {
+		t.Fatal("Expected Down to select descending sort direction")
 	}
 	handleInput(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone), state, app, pages, table, signaler)
-	if !state.ui.ReverseSort {
-		t.Fatal("Expected Up to select descending sort direction")
+	if state.ui.ReverseSort {
+		t.Fatal("Expected Up to select ascending sort direction")
 	}
 
 	handleInput(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone), state, app, pages, table, signaler)
