@@ -364,12 +364,16 @@ func activityMetricLines(state *State, availableWidth int) []resourceLine {
 		))
 	}
 	if len(state.dynamic.Pressure) > 0 {
+		pressureTag := themeAccentTag
+		if pressureIsHigh(state.dynamic.Pressure) {
+			pressureTag = themeAttentionTag
+		}
 		lines = appendMetricLine(lines, dropActivityLine, metricLine(
 			"PSI SOME/FULL",
 			pressureText(state.dynamic.Pressure),
 			"",
 			availableWidth,
-			themeAccentTag,
+			pressureTag,
 		))
 	}
 	return lines

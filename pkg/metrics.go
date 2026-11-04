@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,9 +16,6 @@ const (
 	keyedMetricFieldCount     = 2
 	keyValueFieldCount        = 2
 	alertCapacity             = 4
-	alertMemoryWarnPercent    = 85.0
-	alertMemoryCritPercent    = 95.0
-	alertPIDWarnPercent       = 85.0
 	alertPressureWarnAvg10    = 10.0
 	bytesPerSecondToMiBSecond = 1024 * 1024
 	resourceCPU               = "cpu"
@@ -241,16 +239,13 @@ func evaluateAlerts(staticInfo StaticInfo, dynamic DynamicSnapshot) []Alert {
 	if staticInfo.ContainerMemLimitBytes > 0 {
 		memPercent = (dynamic.ContainerMemUsedGB * bytesPerGB / float64(staticInfo.ContainerMemLimitBytes)) * percentMultiplier
 	}
-	switch {
-	case memPercent >= alertMemoryCritPercent:
-		alerts = append(alerts, Alert{Level: alertCritical, Message: "container memory is above 95%"})
-	case memPercent >= alertMemoryWarnPercent:
-		alerts = append(alerts, Alert{Level: alertWarning, Message: "container memory is above 85%"})
+	if alert, ok := usageAlert("container memory", memPercent); ok {
+		alerts = append(alerts, alert)
 	}
 	if dynamic.PIDUsage.Max > 0 {
 		pidPercent := (float64(dynamic.PIDUsage.Current) / float64(dynamic.PIDUsage.Max)) * percentMultiplier
-		if pidPercent >= alertPIDWarnPercent {
-			alerts = append(alerts, Alert{Level: alertWarning, Message: "PID usage is above 85%"})
+		if alert, ok := usageAlert("PID usage", pidPercent); ok {
+			alerts = append(alerts, alert)
 		}
 	}
 	for _, pressure := range dynamic.Pressure {
@@ -262,6 +257,28 @@ func evaluateAlerts(staticInfo StaticInfo, dynamic DynamicSnapshot) []Alert {
 		}
 	}
 	return alerts
+}
+
+// usageAlert raises a warning or critical alert at the same levels that turn a usage bar gold or red.
+func usageAlert(subject string, percent float64) (Alert, bool) {
+	level, threshold := alertCritical, usageCriticalPercent
+	if percent < usageCriticalPercent {
+		level, threshold = alertWarning, usageWarningPercent
+	}
+	if percent < threshold {
+		return Alert{}, false
+	}
+	return Alert{Level: level, Message: fmt.Sprintf("%s is above %g%%", subject, threshold)}, true
+}
+
+// pressureIsHigh reports whether any resource's pressure is high enough to raise an alert.
+func pressureIsHigh(pressure []PressureStat) bool {
+	for _, stat := range pressure {
+		if stat.SomeAvg10 >= alertPressureWarnAvg10 || stat.FullAvg10 >= alertPressureWarnAvg10 {
+			return true
+		}
+	}
+	return false
 }
 
 // cgroupEventAlerts reports OOM kills and throttling that grew recently. The counters are cumulative
