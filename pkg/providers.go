@@ -172,5 +172,5 @@ func (p OSNetworkProvider) IOCounters(pernic bool) ([]netio.IOCountersStat, erro
 type OSDiskIOProvider struct{}
 
 func (p OSDiskIOProvider) IOCounters(names ...string) (map[string]disk.IOCountersStat, error) {
-	return disk.IOCounters(names...)
+	return readDiskStats(procRoot, names...)
 }
