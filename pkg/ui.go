@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"unicode/utf8"
 
@@ -151,7 +152,7 @@ func handleModalInput(
 		app.Stop()
 		return true, nil
 	}
-	if event.Key() == tcell.KeyEsc || event.Rune() == 'q' {
+	if event.Key() == tcell.KeyEsc || event.Rune() == 'q' || (name == helpPageName && event.Rune() == '?') {
 		pages.RemovePage(name)
 		app.SetFocus(pages)
 		return true, nil
@@ -231,6 +232,14 @@ func isPaused(state *State) bool {
 	return state.ui.Paused
 }
 
+const (
+	helpPageName = "help"
+	helpMaxWidth = 64
+	// helpScreenMargin keeps a cell of the dashboard visible around the help box.
+	helpScreenMargin = 2
+)
+
+// showHelp opens the key list in a left-aligned box that scrolls when the terminal is short.
 func showHelp(pages *tview.Pages) {
 	text := `topic controls
 
@@ -249,7 +258,29 @@ a             toggle ASCII art
 Enter         process details
 k             signal selected process
 ?             this help`
-	showModal(pages, "help", text, []string{"OK"}, 0, nil)
+	view := tview.NewTextView().SetText(text).SetScrollable(true).SetWrap(false)
+	view.SetBorder(true).SetTitle(" Help: ↑↓ PgUp PgDn scroll, Esc close ")
+
+	width := helpMaxWidth
+	height := strings.Count(text, "\n") + 1 + borderHeight
+	if _, _, screenWidth, screenHeight := pages.GetRect(); screenWidth > 0 && screenHeight > 0 {
+		width = min(width, screenWidth-helpScreenMargin)
+		height = min(height, screenHeight-helpScreenMargin)
+	}
+	pages.AddPage(helpPageName, centered(view, width, height), true, true)
+}
+
+// centered places a primitive of a fixed size in the middle of the screen.
+func centered(primitive tview.Primitive, width int, height int) tview.Primitive {
+	column := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(primitive, height, 0, true).
+		AddItem(nil, 0, 1, false)
+	return tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(column, width, 0, true).
+		AddItem(nil, 0, 1, false)
 }
 
 func showProcessDetails(pages *tview.Pages, state *State, table *tview.Table) {
