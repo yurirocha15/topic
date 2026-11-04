@@ -2380,10 +2380,14 @@ func TestMetricsHistoryAlertsAndRender(t *testing.T) {
 func TestSparklineFixedWidthAndTrim(t *testing.T) {
 	var ring HistoryRing
 	ring.Add(25)
+	if got := sparkline(ring); len([]rune(got)) != 1 {
+		t.Fatalf("Expected one block for one sample, got %q", got)
+	}
+	for range historySize {
+		ring.Add(25)
+	}
 	if got := sparkline(ring); len([]rune(got)) != historySize {
-		t.Fatalf("Expected fixed history width %d, got %q", historySize, got)
-	} else if strings.Contains(got, "▁") {
-		t.Fatalf("Expected first history sample to seed the ring without leading zero ramp, got %q", got)
+		t.Fatalf("Expected a full history to be %d blocks, got %q", historySize, got)
 	}
 	trimmed := sparklineForWidth(ring, len("HIST CPU ")+minSparklineWidth, len("HIST CPU "))
 	if len([]rune(trimmed)) != minSparklineWidth {

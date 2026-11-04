@@ -305,9 +305,6 @@ func updateMetricsHistory(history *MetricsHistory, staticInfo StaticInfo, dynami
 func (ring *HistoryRing) Add(value float64) {
 	if len(ring.Values) == 0 {
 		ring.Values = make([]float64, historySize)
-		for index := range ring.Values {
-			ring.Values[index] = value
-		}
 	}
 	ring.Values[ring.Next] = value
 	ring.Next = (ring.Next + 1) % len(ring.Values)
@@ -320,10 +317,9 @@ func (ring *HistoryRing) Ordered() []float64 {
 	if len(ring.Values) == 0 {
 		return nil
 	}
+	// Until the ring wraps, only the samples recorded so far are history
 	if !ring.Filled {
-		ordered := make([]float64, len(ring.Values))
-		copy(ordered, ring.Values)
-		return ordered
+		return slices.Clone(ring.Values[:ring.Next])
 	}
 	ordered := make([]float64, 0, len(ring.Values))
 	ordered = append(ordered, ring.Values[ring.Next:]...)
@@ -331,12 +327,29 @@ func (ring *HistoryRing) Ordered() []float64 {
 	return ordered
 }
 
+// percentSparkline draws a percentage history on a fixed 0-100 scale, so the height of a block
+// always means the same usage.
+// sparklineBlocks are the eight block heights a history is drawn with, lowest first.
+const sparklineBlocks = "▁▂▃▄▅▆▇█"
+
+func percentSparkline(ring HistoryRing) string {
+	blocks := []rune(sparklineBlocks)
+	lastBlock := float64(len(blocks) - 1)
+	var builder strings.Builder
+	for _, value := range (&ring).Ordered() {
+		index := int(min(max(value, 0), percentMultiplier) / percentMultiplier * lastBlock)
+		builder.WriteRune(blocks[index])
+	}
+	return builder.String()
+}
+
+// sparkline draws a history scaled to its own peak, for rates that have no fixed maximum.
 func sparkline(ring HistoryRing) string {
 	values := (&ring).Ordered()
 	if len(values) == 0 {
 		return ""
 	}
-	const blocks = "▁▂▃▄▅▆▇█"
+	blocks := []rune(sparklineBlocks)
 	maxValue := 0.0
 	for _, value := range values {
 		if value > maxValue {
@@ -348,8 +361,8 @@ func sparkline(ring HistoryRing) string {
 	}
 	var builder strings.Builder
 	for _, value := range values {
-		index := max(int((value/maxValue)*float64(len([]rune(blocks))-1)), 0)
-		builder.WriteRune([]rune(blocks)[index])
+		index := max(int((value/maxValue)*float64(len(blocks)-1)), 0)
+		builder.WriteRune(blocks[index])
 	}
 	return builder.String()
 }

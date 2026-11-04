@@ -390,7 +390,7 @@ func pidMetricLine(pid PIDUsage, availableWidth int) string {
 }
 
 func historyLine(label string, ring HistoryRing, availableWidth int) string {
-	return metricLine(label, "", sparkline(ring), availableWidth, themeAccentTag)
+	return metricLine(label, "", percentSparkline(ring), availableWidth, themeAccentTag)
 }
 
 // metricLine formats one label/value/trend row, ending in a newline, or returns "" when there is no room.
