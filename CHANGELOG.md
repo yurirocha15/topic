@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Wide characters, such as Japanese or Chinese text in mount paths and interface names, no longer push rows out of alignment or past the edge of the panel.
 - Long mount paths are shortened once, from the left, so the end of the path stays visible, as in `DISK …models/llama`. Two mounts with a long shared beginning were previously cut down to the same text.
 - Without a GPU, the process table no longer shows empty `%GPU` and `%GPUMEM` columns, which leaves more room for commands, and sort mode skips them.
+- On terminals narrower than 100 columns, the side panel is hidden so the CPU, memory, and disk rows keep their labels and details; the process table title shows `? help` instead. The top panel now takes at most half the screen, dropping history, then pressure and disk I/O, then network rows when space runs out, so the process table always keeps the other half.
 
 ### Changed
 

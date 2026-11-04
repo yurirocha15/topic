@@ -198,60 +198,17 @@ func writeOnceSnapshot(stdout io.Writer, config AppConfig, state *State) error {
 
 // runTUI shows the dashboard until the user quits or ctx is cancelled.
 func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state *State, refresh func()) error {
-	// --- Create UI Components ---
+	board := newDashboard(state)
+	render := board.render
 
-	// Left panel for resources
-	resourceView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetWrap(false)
-
-	// Right panel for title and help
-	infoView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft)
-
-	// Bottom panel for processes
-	processTable := configureProcessTable(tview.NewTable())
-	trackProcessSelection(processTable, state)
-
-	// --- Create the Layout ---
-
-	// Top panel combines resources (left) and info (right)
-	topPanel := tview.NewFlex().
-		SetDirection(tview.FlexColumn).
-		AddItem(resourceView, 0, 1, false).                // Resources take up remaining width
-		AddItem(infoView, compactInfoPanelWidth, 0, false) // Info panel has a fixed width
-
-	topPanel.SetBorder(true).SetTitle(" System ")
-
-	// Main layout combines top panel and process table
-	mainLayout := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(topPanel, placeholderHeight, 0, false). // Top panel has a placeholder height, will be resized
-		AddItem(processTable, 0, 1, true)               // Process table takes all remaining vertical space
-	pages := tview.NewPages().
-		AddPage("main", mainLayout, true, true)
-	// Rows are laid out for the width of their view, which is only known after a draw. renderedSize
-	// is the screen size the last layout used; a draw at another size lays the rows out again.
-	var renderedWidth, renderedHeight int
-	render := func() {
-		_, _, renderedWidth, renderedHeight = pages.GetRect()
-		leftHeight := updateResourceView(resourceView, state)
-		rightHeight := updateInfoView(infoView, state)
-		topPanel.ResizeItem(infoView, currentInfoPanelWidth(state), 0)
-		topPanelHeight := max(leftHeight, rightHeight) + borderHeight
-		mainLayout.ResizeItem(topPanel, topPanelHeight, 0)
-		updateProcessTable(processTable, state)
-	}
-
-	setAppInputCapture(app, state, pages, processTable, OSProcessSignaler{}, render)
+	setAppInputCapture(app, state, board.pages, board.processTable, OSProcessSignaler{}, render)
 	afterDraw := app.GetAfterDrawFunc()
 	app.SetAfterDrawFunc(func(screen tcell.Screen) {
 		if afterDraw != nil {
 			afterDraw(screen)
 		}
 		// The first frame and the first frame after a resize used the old size; lay out again.
-		if width, height := screen.Size(); width != renderedWidth || height != renderedHeight {
+		if width, height := screen.Size(); width != board.renderedWidth || height != board.renderedHeight {
 			go app.QueueUpdateDraw(render)
 		}
 	})
@@ -288,7 +245,7 @@ func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state
 		}
 	}()
 
-	return app.SetRoot(pages, true).EnableMouse(true).Run()
+	return app.SetRoot(board.pages, true).EnableMouse(true).Run()
 }
 
 func configureProcessTable(table *tview.Table) *tview.Table {

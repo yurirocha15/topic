@@ -114,9 +114,8 @@ func TestWriteAlertMetricsUsesLevelColor(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.level, func(t *testing.T) {
-			var builder strings.Builder
-			writeAlertMetrics(&builder, []Alert{{Level: test.level, Message: "message"}}, 80)
-			text := builder.String()
+			state := &State{dynamic: DynamicInfo{Alerts: []Alert{{Level: test.level, Message: "message"}}}}
+			text := buildMetricsSection(state, 80)
 			if !strings.Contains(text, test.want) || strings.Contains(text, test.avoid) {
 				t.Fatalf("alert text = %q, want %s and not %s", text, test.want, test.avoid)
 			}

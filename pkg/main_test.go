@@ -751,28 +751,7 @@ func TestCompactInfoPanelLeavesProcessTableSpace(t *testing.T) {
 		state.history.GPU.Add(float64(i))
 	}
 
-	resourceView := tview.NewTextView().SetDynamicColors(true).SetWrap(false)
-	infoView := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignLeft)
-	processTable := configureProcessTable(tview.NewTable())
-	topPanel := tview.NewFlex().
-		SetDirection(tview.FlexColumn).
-		AddItem(resourceView, 0, 1, false).
-		AddItem(infoView, compactInfoPanelWidth, 0, false)
-	topPanel.SetBorder(true).SetTitle(" System ")
-	mainLayout := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(topPanel, placeholderHeight, 0, false).
-		AddItem(processTable, 0, 1, true)
-
-	screen := tcell.NewSimulationScreen("UTF-8")
-	app := tview.NewApplication().SetScreen(screen).SetRoot(mainLayout, true)
-	screen.SetSize(200, 50)
-	leftHeight := updateResourceView(resourceView, state)
-	rightHeight := updateInfoView(infoView, state)
-	topPanel.ResizeItem(infoView, currentInfoPanelWidth(state), 0)
-	mainLayout.ResizeItem(topPanel, max(leftHeight, rightHeight)+borderHeight, 0)
-	updateProcessTable(processTable, state)
-	app.ForceDraw()
+	_, topPanel, processTable, _ := renderDashboardTestScreen(state, 200, 50)
 
 	_, _, _, topHeight := topPanel.GetRect()
 	_, _, _, tableHeight := processTable.GetRect()
@@ -837,31 +816,14 @@ func renderDashboardTestScreen(
 	width int,
 	height int,
 ) (*tview.TextView, *tview.Flex, *tview.Table, tcell.SimulationScreen) {
-	resourceView := tview.NewTextView().SetDynamicColors(true).SetWrap(false)
-	infoView := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignLeft)
-	processTable := configureProcessTable(tview.NewTable())
-	topPanel := tview.NewFlex().
-		SetDirection(tview.FlexColumn).
-		AddItem(resourceView, 0, 1, false).
-		AddItem(infoView, compactInfoPanelWidth, 0, false)
-	topPanel.SetBorder(true).SetTitle(" System ")
-	mainLayout := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(topPanel, placeholderHeight, 0, false).
-		AddItem(processTable, 0, 1, true)
-
+	board := newDashboard(state)
 	screen := tcell.NewSimulationScreen("UTF-8")
-	app := tview.NewApplication().SetScreen(screen).SetRoot(mainLayout, true)
+	app := tview.NewApplication().SetScreen(screen).SetRoot(board.pages, true)
 	screen.SetSize(width, height)
 	app.ForceDraw()
-
-	leftHeight := updateResourceView(resourceView, state)
-	rightHeight := updateInfoView(infoView, state)
-	topPanel.ResizeItem(infoView, currentInfoPanelWidth(state), 0)
-	mainLayout.ResizeItem(topPanel, max(leftHeight, rightHeight)+borderHeight, 0)
-	updateProcessTable(processTable, state)
+	board.render()
 	app.ForceDraw()
-	return resourceView, topPanel, processTable, screen
+	return board.resourceView, board.topPanel, board.processTable, screen
 }
 
 func assertDashboardPanelGeometry(t *testing.T, topPanel *tview.Flex, processTable *tview.Table) {

@@ -9,20 +9,14 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-func updateResourceView(view *tview.TextView, state *State) int {
-	state.dynamic.mu.Lock()
-	defer state.dynamic.mu.Unlock()
-
-	// Get the available width inside the view, minus padding.
-	_, _, availableWidth, _ := view.GetInnerRect()
-	availableWidth -= borderHeight // Account for horizontal padding within the box
-
-	finalText := buildResourceText(availableWidth, state)
-	view.SetText(finalText)
-	return strings.Count(finalText, "\n")
+func buildResourceText(availableWidth int, state *State) string {
+	return buildResourceTextWithLimit(availableWidth, 0, state)
 }
 
-func buildResourceText(availableWidth int, state *State) string {
+// buildResourceTextWithLimit builds the resource rows. When maxRows is positive and the rows do
+// not fit, history rows are dropped first, then pressure and disk I/O, then network and PIDs.
+// Resource bars and alerts are always kept.
+func buildResourceTextWithLimit(availableWidth int, maxRows int, state *State) string {
 	resourceBars := make([]BarData, 0, 2+len(state.dynamic.StorageUsage)+len(state.dynamic.LiveGPUUsage)*barsPerGPU)
 	cpuLabel, cpuInfo, cpuUsage := calculateCPULabelInfo(state)
 	resourceBars = append(resourceBars, newBarData(cpuLabel, cpuUsage, cpuInfo))
@@ -33,15 +27,49 @@ func buildResourceText(availableWidth int, state *State) string {
 		resourceBars = append(resourceBars, calculateGPUBars(state)...)
 	}
 
-	var builder strings.Builder
 	layout := calculateResourceLayout(availableWidth, resourceBars)
-	for _, row := range makeAlignedMultiColumnBars(resourceBars, layout) {
+	barRows := makeAlignedMultiColumnBars(resourceBars, layout)
+	metricRows := metricsSectionLines(state, availableWidth)
+	if maxRows > 0 {
+		metricRows = dropLowPriorityLines(metricRows, maxRows-len(barRows))
+	}
+
+	var builder strings.Builder
+	for _, row := range barRows {
 		builder.WriteString(row)
 		builder.WriteByte('\n')
 	}
-	builder.WriteString(buildMetricsSection(state, availableWidth))
-
+	for _, row := range metricRows {
+		builder.WriteString(row.text)
+	}
 	return builder.String()
+}
+
+// resourceLine is one row below the resource bars. Rows with a higher dropRank are dropped first
+// when the panel is short of space; rank 0 is never dropped.
+type resourceLine struct {
+	text     string
+	dropRank int
+}
+
+const (
+	keepResourceLine    = 0
+	dropNetworkLine     = 1
+	dropActivityLine    = 2
+	dropHistoryLine     = 3
+	maxResourceLineRank = dropHistoryLine
+)
+
+// dropLowPriorityLines removes rows, highest rank and lowest on screen first, until at most limit remain.
+func dropLowPriorityLines(lines []resourceLine, limit int) []resourceLine {
+	for rank := maxResourceLineRank; rank > keepResourceLine && len(lines) > max(limit, 0); rank-- {
+		for index := len(lines) - 1; index >= 0 && len(lines) > max(limit, 0); index-- {
+			if lines[index].dropRank == rank {
+				lines = append(lines[:index], lines[index+1:]...)
+			}
+		}
+	}
+	return lines
 }
 
 func calculateResourceLayout(availableWidth int, bars []BarData) BarLayout {
@@ -260,53 +288,54 @@ func buildBarSection(layout BarLayout, bars []BarData) string {
 }
 
 func buildMetricsSection(state *State, availableWidth int) string {
-	hasActivity := hasActivityMetrics(&state.dynamic)
-	hasHistory := state.history.CPU.Next > 0 || state.history.CPU.Filled
-	if !hasActivity && !hasHistory && len(state.dynamic.Alerts) == 0 {
-		return ""
-	}
-
 	var builder strings.Builder
-	writeAlertMetrics(&builder, state.dynamic.Alerts, availableWidth)
-	if hasActivity {
-		writeActivityMetrics(&builder, state, availableWidth)
-	}
-	if hasHistory {
-		writeHistoryMetrics(&builder, state, availableWidth)
+	for _, line := range metricsSectionLines(state, availableWidth) {
+		builder.WriteString(line.text)
 	}
 	return builder.String()
 }
 
-func hasActivityMetrics(dynamic *DynamicInfo) bool {
-	return len(dynamic.NetworkUsage) > 0 ||
-		len(dynamic.DiskIOUsage) > 0 ||
-		dynamic.PIDUsage.Current > 0 ||
-		len(dynamic.Pressure) > 0
-}
-
-func writeAlertMetrics(builder *strings.Builder, alerts []Alert, availableWidth int) {
-	for _, alert := range alerts {
+func metricsSectionLines(state *State, availableWidth int) []resourceLine {
+	var lines []resourceLine
+	for _, alert := range state.dynamic.Alerts {
 		colorTag := "[red]"
 		if alert.Level == alertWarning {
 			colorTag = themeAttentionTag
 		}
-		writeMetricLine(
-			builder,
+		lines = appendMetricLine(lines, keepResourceLine, metricLine(
 			"ALERT "+strings.ToUpper(alert.Level),
 			alert.Message,
 			"",
 			availableWidth,
 			colorTag,
-		)
+		))
 	}
+	lines = append(lines, activityMetricLines(state, availableWidth)...)
+	if state.history.CPU.Next > 0 || state.history.CPU.Filled {
+		lines = appendMetricLine(lines, dropHistoryLine,
+			historyLine("HIST "+metricCPULabel, state.history.CPU, availableWidth))
+		lines = appendMetricLine(lines, dropHistoryLine,
+			historyLine("HIST "+metricMemoryLabel, state.history.Memory, availableWidth))
+		if state.static.GPUCount > 0 {
+			lines = appendMetricLine(lines, dropHistoryLine, historyLine("HIST GPU", state.history.GPU, availableWidth))
+		}
+	}
+	return lines
 }
 
-func writeActivityMetrics(builder *strings.Builder, state *State, availableWidth int) {
-	writePIDMetric(builder, state.dynamic.PIDUsage, availableWidth)
+func appendMetricLine(lines []resourceLine, dropRank int, text string) []resourceLine {
+	if text == "" {
+		return lines
+	}
+	return append(lines, resourceLine{text: text, dropRank: dropRank})
+}
+
+func activityMetricLines(state *State, availableWidth int) []resourceLine {
+	var lines []resourceLine
+	lines = appendMetricLine(lines, dropNetworkLine, pidMetricLine(state.dynamic.PIDUsage, availableWidth))
 	if len(state.dynamic.NetworkUsage) > 0 {
 		network := state.dynamic.NetworkUsage[0]
-		writeMetricLine(
-			builder,
+		lines = appendMetricLine(lines, dropNetworkLine, metricLine(
 			"NET "+network.Name,
 			throughputText(
 				"RX",
@@ -317,12 +346,11 @@ func writeActivityMetrics(builder *strings.Builder, state *State, availableWidth
 			sparkline(state.history.Network),
 			availableWidth,
 			themeAccentTag,
-		)
+		))
 	}
 	if len(state.dynamic.DiskIOUsage) > 0 {
 		disk := state.dynamic.DiskIOUsage[0]
-		writeMetricLine(
-			builder,
+		lines = appendMetricLine(lines, dropActivityLine, metricLine(
 			"IO "+disk.Name,
 			throughputText(
 				"R",
@@ -333,23 +361,23 @@ func writeActivityMetrics(builder *strings.Builder, state *State, availableWidth
 			sparkline(state.history.DiskIO),
 			availableWidth,
 			themeAccentTag,
-		)
+		))
 	}
 	if len(state.dynamic.Pressure) > 0 {
-		writeMetricLine(
-			builder,
+		lines = appendMetricLine(lines, dropActivityLine, metricLine(
 			"PSI SOME/FULL",
 			pressureText(state.dynamic.Pressure),
 			"",
 			availableWidth,
 			themeAccentTag,
-		)
+		))
 	}
+	return lines
 }
 
-func writePIDMetric(builder *strings.Builder, pid PIDUsage, availableWidth int) {
+func pidMetricLine(pid PIDUsage, availableWidth int) string {
 	if pid.Current == 0 {
-		return
+		return ""
 	}
 	maxText := pid.MaxText
 	if maxText == "" && pid.Max > 0 {
@@ -358,38 +386,23 @@ func writePIDMetric(builder *strings.Builder, pid PIDUsage, availableWidth int) 
 	if maxText == "" {
 		maxText = "unknown"
 	}
-	writeMetricLine(
-		builder,
-		"PIDS",
-		fmt.Sprintf("%d / %s", pid.Current, maxText),
-		"",
-		availableWidth,
-		themeAccentTag,
-	)
+	return metricLine("PIDS", fmt.Sprintf("%d / %s", pid.Current, maxText), "", availableWidth, themeAccentTag)
 }
 
-func writeHistoryMetrics(builder *strings.Builder, state *State, availableWidth int) {
-	writeHistoryLine(builder, "HIST "+metricCPULabel, state.history.CPU, availableWidth)
-	writeHistoryLine(builder, "HIST "+metricMemoryLabel, state.history.Memory, availableWidth)
-	if state.static.GPUCount > 0 {
-		writeHistoryLine(builder, "HIST GPU", state.history.GPU, availableWidth)
-	}
+func historyLine(label string, ring HistoryRing, availableWidth int) string {
+	return metricLine(label, "", sparkline(ring), availableWidth, themeAccentTag)
 }
 
-func writeHistoryLine(builder *strings.Builder, label string, ring HistoryRing, availableWidth int) {
-	writeMetricLine(builder, label, "", sparkline(ring), availableWidth, themeAccentTag)
-}
-
-func writeMetricLine(
-	builder *strings.Builder,
+// metricLine formats one label/value/trend row, ending in a newline, or returns "" when there is no room.
+func metricLine(
 	label string,
 	value string,
 	trend string,
 	availableWidth int,
 	valueTag string,
-) {
+) string {
 	if availableWidth <= 0 {
-		return
+		return ""
 	}
 	labelWidth := min(activityLabelWidth, max(0, availableWidth-metricFieldSpacing))
 	label = truncatePlainText(label, labelWidth)
@@ -406,6 +419,7 @@ func writeMetricLine(
 		trend = trimSparkline(trend, min(historySize, trendWidth))
 	}
 
+	var builder strings.Builder
 	builder.WriteString(themeLabelTag)
 	builder.WriteString(displayText(padPlainText(label, labelWidth)))
 	builder.WriteString(themeResetTag)
@@ -424,6 +438,7 @@ func writeMetricLine(
 		builder.WriteString(themeResetTag)
 	}
 	builder.WriteByte('\n')
+	return builder.String()
 }
 
 func throughputText(firstLabel string, first float64, secondLabel string, second float64) string {

@@ -60,18 +60,11 @@ func TestMetricLinesFitWithWideCharacters(t *testing.T) {
 	state := hostDashboardState()
 	state.dynamic.NetworkUsage = []NetworkUsage{{Name: "ネットワーク接続インターフェース"}}
 	for _, width := range []int{40, 80} {
-		builder := new(stringsBuilder)
-		writeActivityMetrics(&builder.Builder, state, width)
-		for _, line := range builder.lines() {
+		for _, row := range activityMetricLines(state, width) {
+			line := strings.TrimSuffix(row.text, "\n")
 			if got := tview.TaggedStringWidth(line); got > width {
 				t.Errorf("width %d: metric line is %d cells: %q", width, got, line)
 			}
 		}
 	}
-}
-
-type stringsBuilder struct{ strings.Builder }
-
-func (b *stringsBuilder) lines() []string {
-	return strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
 }

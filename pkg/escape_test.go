@@ -80,8 +80,7 @@ func TestFilterStatusShowsUntrustedTextLiterally(t *testing.T) {
 
 func TestMetricRowsShowUntrustedTextLiterally(t *testing.T) {
 	var builder strings.Builder
-	writeMetricLine(&builder, "NET [red]e0", "[blue]value", "", 80, themeAccentTag)
-	builder.WriteString("\n")
+	builder.WriteString(metricLine("NET [red]e0", "[blue]value", "", 80, themeAccentTag))
 	builder.WriteString(formatAlignedBar(BarData{Label: "DISK [red]/x", Info: "[blue]info"}, 10, 16, 12, 60))
 
 	view := tview.NewTextView().SetDynamicColors(true).SetText(builder.String())
