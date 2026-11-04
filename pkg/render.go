@@ -628,8 +628,9 @@ func formatAlignedBar(bar BarData, barWidth int, maxLabelWidth int, maxInfoWidth
 	builder.WriteString(makeBar(bar.Percent, barWidth))
 	if maxInfoWidth > 0 {
 		builder.WriteString(strings.Repeat(" ", metricFieldSpacing))
-		builder.WriteString(themeMutedTag)
-		builder.WriteString(displayText(info))
+		builder.WriteString(themeLabelTag)
+		// Details read in the normal text color; only the separator between used and total is muted
+		builder.WriteString(strings.ReplaceAll(displayText(info), " / ", themeMutedTag+" / "+themeLabelTag))
 		builder.WriteString(themeResetTag)
 	}
 
