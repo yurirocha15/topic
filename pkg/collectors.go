@@ -119,6 +119,11 @@ func newDynamicCollectorSet(
 
 	if staticInfo.GPUCount > 0 {
 		collectors.LiveGPU = func() []GPUUsage {
+			if state.gpuStream != nil {
+				if usage, ok := state.gpuStream.Usage(staticInfo.GPUCount); ok {
+					return usage
+				}
+			}
 			return updateLiveGPUUsage(staticInfo.GPUCount, runner)
 		}
 	}

@@ -159,6 +159,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 
+	// The dashboard keeps one nvidia-smi running for GPU usage instead of starting one each refresh
+	if staticInfo.GPUCount > 0 {
+		state.gpuStream = newGPUUsageStream(cmdRunner, config.RefreshInterval)
+		defer state.gpuStream.Stop()
+	}
 	if err = runTUI(ctx, tview.NewApplication(), config, state, refresh); err != nil {
 		fmt.Fprintf(stderr, "Could not start application: %v\n", err)
 		return exitFailure

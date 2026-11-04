@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -53,6 +56,44 @@ func (ocr OSCommandRunner) Output(name string, arg ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	return exec.CommandContext(ctx, name, arg...).Output()
+}
+
+// Start runs a long-lived command and returns its output. Closing the output stops the command.
+// The command also stops when the runner's context is cancelled.
+func (ocr OSCommandRunner) Start(name string, arg ...string) (io.ReadCloser, error) {
+	parent := ocr.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	command := exec.CommandContext(ctx, name, arg...)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("pipe %s output: %w", name, err)
+	}
+	if err = command.Start(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("start %s: %w", name, err)
+	}
+	return &commandOutput{ReadCloser: stdout, command: command, cancel: cancel}, nil
+}
+
+// commandOutput is the output of a running command; Close stops the command and waits for it.
+type commandOutput struct {
+	io.ReadCloser
+
+	command *exec.Cmd
+	cancel  context.CancelFunc
+	once    sync.Once
+}
+
+func (o *commandOutput) Close() error {
+	o.once.Do(func() {
+		o.cancel()
+		_ = o.command.Wait()
+	})
+	return nil
 }
 
 // Stater defines an interface for checking file status.
