@@ -135,6 +135,6 @@ if ! command -v "$BINARY_NAME" >/dev/null 2>&1; then
     fi
 fi
 
-VERSION=$("$BINARY_NAME" --version 2>/dev/null || echo "(version not available)")
-info "Successfully installed $BINARY_NAME version: $VERSION"
+VERSION=$("$BINARY_NAME" --version 2>/dev/null || echo "$BINARY_NAME (version not available)")
+info "Successfully installed $VERSION"
 info "You can now run '$BINARY_NAME' from anywhere in your terminal."
