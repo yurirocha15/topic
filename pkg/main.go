@@ -232,7 +232,11 @@ func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state
 		AddItem(processTable, 0, 1, true)               // Process table takes all remaining vertical space
 	pages := tview.NewPages().
 		AddPage("main", mainLayout, true, true)
+	// Rows are laid out for the width of their view, which is only known after a draw. renderedSize
+	// is the screen size the last layout used; a draw at another size lays the rows out again.
+	var renderedWidth, renderedHeight int
 	render := func() {
+		_, _, renderedWidth, renderedHeight = pages.GetRect()
 		leftHeight := updateResourceView(resourceView, state)
 		rightHeight := updateInfoView(infoView, state)
 		topPanel.ResizeItem(infoView, currentInfoPanelWidth(state), 0)
@@ -242,6 +246,16 @@ func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state
 	}
 
 	setAppInputCapture(app, state, pages, processTable, OSProcessSignaler{}, render)
+	afterDraw := app.GetAfterDrawFunc()
+	app.SetAfterDrawFunc(func(screen tcell.Screen) {
+		if afterDraw != nil {
+			afterDraw(screen)
+		}
+		// The first frame and the first frame after a resize used the old size; lay out again.
+		if width, height := screen.Size(); width != renderedWidth || height != renderedHeight {
+			go app.QueueUpdateDraw(render)
+		}
+	})
 
 	// Initial data load and draw, finished before the ticker can start another refresh
 	refresh()

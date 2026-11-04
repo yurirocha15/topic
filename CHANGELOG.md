@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - When filtering shortens the process table, a visible process stays selected instead of `Enter` and `k` reporting "No process selected".
 - The mouse now works in the process table and dialogs, as the help already described.
 - The sort arrow now shows the real direction: `↓` is high to low and `↑` is low to high for every column. In sort mode, `↓` and `↑` choose that direction.
+- The dashboard is laid out for the terminal's real size as soon as it starts and right after a resize. The first screen previously had no labels, and a resized screen kept the old layout until the next refresh.
 
 ### Changed
 
