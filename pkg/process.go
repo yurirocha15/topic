@@ -376,7 +376,7 @@ func processDetailsText(process ProcessInfo) string {
 	gpu := "none"
 	if process.GPUIndex >= 0 {
 		gpu = fmt.Sprintf(
-			"GPU%d util=%d%% mem=%.1f%% (%d MB)",
+			"GPU%d util=%d%% mem=%.1f%% (%d MiB)",
 			process.GPUIndex,
 			process.GPUUtil,
 			process.GPUMemPercent,

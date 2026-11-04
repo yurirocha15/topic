@@ -88,7 +88,7 @@ func TestMetricRowsShowUntrustedTextLiterally(t *testing.T) {
 }
 
 func TestFormatAlignedBarWidthIgnoresEscaping(t *testing.T) {
-	plain := formatAlignedBar(BarData{Label: "DISK /mntabcd", Info: "1.00 GB"}, 10, 16, 12, 60)
+	plain := formatAlignedBar(BarData{Label: "DISK /mntabcd", Info: "1.00 GiB"}, 10, 16, 12, 60)
 	bracketed := formatAlignedBar(BarData{Label: "DISK /[red]x", Info: "[N/A]"}, 10, 16, 12, 60)
 	if got, want := tview.TaggedStringWidth(bracketed), tview.TaggedStringWidth(plain); got != want {
 		t.Errorf("escaped row width = %d, want %d", got, want)

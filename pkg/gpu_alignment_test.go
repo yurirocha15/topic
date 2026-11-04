@@ -39,8 +39,8 @@ func TestCalculateGPUBarsUsesGPUIndexForLabelsAndTotals(t *testing.T) {
 	if bars[0].Label != "GPU2 UTIL" || bars[1].Label != "GPU2 MEM" {
 		t.Fatalf("expected labels GPU2 UTIL/GPU2 MEM, got %q/%q", bars[0].Label, bars[1].Label)
 	}
-	if bars[1].Info != "4.00 / 16.00 GB" {
-		t.Fatalf("expected info %q, got %q", "4.00 / 16.00 GB", bars[1].Info)
+	if bars[1].Info != "4.00 / 16.00 GiB" {
+		t.Fatalf("expected info %q, got %q", "4.00 / 16.00 GiB", bars[1].Info)
 	}
 	if bars[1].Percent != 25 {
 		t.Fatalf("expected mem percent 25, got %v", bars[1].Percent)
@@ -83,11 +83,11 @@ func TestGPUBarsAlignTotalsWhenStaticAndLiveRowsAreMalformed(t *testing.T) {
 	if bars[0].Label != "GPU0 UTIL" || bars[2].Label != "GPU2 UTIL" {
 		t.Fatalf("unexpected labels %q, %q", bars[0].Label, bars[2].Label)
 	}
-	if bars[1].Info != "1.00 / 16.00 GB" {
-		t.Fatalf("GPU0 info: expected %q, got %q", "1.00 / 16.00 GB", bars[1].Info)
+	if bars[1].Info != "1.00 / 16.00 GiB" {
+		t.Fatalf("GPU0 info: expected %q, got %q", "1.00 / 16.00 GiB", bars[1].Info)
 	}
-	if bars[3].Info != "2.00 / 24.00 GB" {
-		t.Fatalf("GPU2 info: expected %q, got %q", "2.00 / 24.00 GB", bars[3].Info)
+	if bars[3].Info != "2.00 / 24.00 GiB" {
+		t.Fatalf("GPU2 info: expected %q, got %q", "2.00 / 24.00 GiB", bars[3].Info)
 	}
 }
 
@@ -103,8 +103,8 @@ func TestCalculateGPUBarsUnknownTotalShowsUsedOnlyAndZeroPercent(t *testing.T) {
 	if p := bars[1].Percent; p != 0 || math.IsNaN(p) || math.IsInf(p, 0) {
 		t.Fatalf("expected mem percent exactly 0, got %v", p)
 	}
-	if bars[1].Info != "1.00 GB" {
-		t.Fatalf("expected info %q, got %q", "1.00 GB", bars[1].Info)
+	if bars[1].Info != "1.00 GiB" {
+		t.Fatalf("expected info %q, got %q", "1.00 GiB", bars[1].Info)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestCalculateGPUBarsTwoLiveRowsUseTheirOwnIndexTotals(t *testing.T) {
 	if bars[0].Label != "GPU0 UTIL" || bars[2].Label != "GPU2 UTIL" {
 		t.Fatalf("expected GPU0/GPU2 labels, got %q/%q", bars[0].Label, bars[2].Label)
 	}
-	if bars[1].Info != "2.00 / 8.00 GB" || bars[3].Info != "4.00 / 16.00 GB" {
+	if bars[1].Info != "2.00 / 8.00 GiB" || bars[3].Info != "4.00 / 16.00 GiB" {
 		t.Fatalf("unexpected infos %q / %q", bars[1].Info, bars[3].Info)
 	}
 }

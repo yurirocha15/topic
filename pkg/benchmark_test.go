@@ -24,8 +24,8 @@ func BenchmarkCalculateBarWidth(b *testing.B) {
 	}
 	infos := []string{
 		"4.00 CPU limit",
-		"3.67 / 6.00 GB",
-		"48.80 / 100.00 GB",
+		"3.67 / 6.00 GiB",
+		"48.80 / 100.00 GiB",
 	}
 
 	for range b.N {
@@ -141,10 +141,10 @@ func storageSectionBenchmarkFixture() (BarLayout, []string, []string, []float64)
 		"DISK /cache",
 	}
 	infos := []string{
-		"38.20 / 100.00 GB",
-		"71.40 / 100.00 GB",
-		"12.90 / 100.00 GB",
-		"55.00 / 100.00 GB",
+		"38.20 / 100.00 GiB",
+		"71.40 / 100.00 GiB",
+		"12.90 / 100.00 GiB",
+		"55.00 / 100.00 GiB",
 	}
 	percentages := []float64{38.2, 71.4, 12.9, 55.0}
 	maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromSlices(labels, infos)

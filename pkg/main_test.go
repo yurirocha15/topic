@@ -364,7 +364,7 @@ func TestCalculateLabelInfo(t *testing.T) {
 	}
 
 	memLabel, memInfo, memPercent := calculateMEMLabelInfo(state)
-	if memLabel != "MEMORY" || memInfo != "2.00 / 4.00 GB" || memPercent != 50 {
+	if memLabel != "MEMORY" || memInfo != "2.00 / 4.00 GiB" || memPercent != 50 {
 		t.Fatalf("Unexpected limited MEM label/info: %q %q %.1f", memLabel, memInfo, memPercent)
 	}
 
@@ -384,7 +384,7 @@ func TestCalculateLabelInfo(t *testing.T) {
 
 func TestCalculateBarWidth(t *testing.T) {
 	labels := []string{"CPU", "MEMORY"}
-	infos := []string{"2.00 CPU limit", "1.00 / 4.00 GB"}
+	infos := []string{"2.00 CPU limit", "1.00 / 4.00 GiB"}
 
 	width := calculateBarWidth(180, labels, infos)
 	if width <= minBarWidth {
@@ -418,7 +418,7 @@ func TestStorageAndGPULabelInfo(t *testing.T) {
 	if len(labels) != 2 || len(infos) != 2 || len(percentages) != 2 {
 		t.Fatalf("Unexpected storage label slice sizes: %d %d %d", len(labels), len(infos), len(percentages))
 	}
-	if labels[0] != "DISK /" || infos[0] != "10.00 / 100.00 GB" {
+	if labels[0] != "DISK /" || infos[0] != "10.00 / 100.00 GiB" {
 		t.Fatalf("Unexpected root storage label/info: %q %q", labels[0], infos[0])
 	}
 	if labels[1] != "DISK /very/long/path/for/storage" {
@@ -436,7 +436,7 @@ func TestStorageAndGPULabelInfo(t *testing.T) {
 		t.Fatalf("Unexpected GPU util label/percent: %q %.1f", labels[0], percentages[0])
 	}
 	if labels[1] != "GPU0 MEM" ||
-		infos[1] != "4.00 / 8.00 GB" ||
+		infos[1] != "4.00 / 8.00 GiB" ||
 		percentages[1] != 50 {
 		t.Fatalf("Unexpected GPU memory label/info/percent: %q %q %.1f", labels[1], infos[1], percentages[1])
 	}
@@ -452,9 +452,9 @@ func TestBuildSectionsAndAlignedRows(t *testing.T) {
 		"DISK /logs",
 	}
 	infos := []string{
-		"10.00 / 100.00 GB",
-		"50.00 / 100.00 GB",
-		"90.00 / 100.00 GB",
+		"10.00 / 100.00 GiB",
+		"50.00 / 100.00 GiB",
+		"90.00 / 100.00 GiB",
 	}
 	percentages := []float64{10, 50, 90}
 	maxLabelWidth, maxInfoWidth := calculateMaxWidthsFromSlices(labels, infos)
@@ -2054,7 +2054,7 @@ func TestUpdateProcessList(t *testing.T) {
 				t.Errorf("Expected GPUUtil to be 50, got %d", p.GPUUtil)
 			}
 			if p.GPUMemPercent != 25.0 {
-				t.Errorf("Expected GPUMemPercent to be 25.0 (4096 MB of 16 GB), got %f", p.GPUMemPercent)
+				t.Errorf("Expected GPUMemPercent to be 25.0 (4096 MB of 16 GiB), got %f", p.GPUMemPercent)
 			}
 			break
 		}

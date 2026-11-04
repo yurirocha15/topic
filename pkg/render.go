@@ -145,7 +145,7 @@ func calculateMEMLabelInfo(state *State) (string, string, float64) {
 		}
 		label = metricMemoryLabel
 		info = fmt.Sprintf(
-			"%.2f / %.2f GB, no limit",
+			"%.2f / %.2f GiB, no limit",
 			state.dynamic.HostMemUsedGB,
 			state.static.HostMemTotalGB,
 		)
@@ -154,7 +154,7 @@ func calculateMEMLabelInfo(state *State) (string, string, float64) {
 		percent = (state.dynamic.ContainerMemUsedGB * bytesPerGB / float64(state.static.ContainerMemLimitBytes)) * percentMultiplier
 		label = metricMemoryLabel
 		info = fmt.Sprintf(
-			"%.2f / %.2f GB",
+			"%.2f / %.2f GiB",
 			state.dynamic.ContainerMemUsedGB,
 			state.static.ContainerMemLimitGB,
 		)
@@ -199,7 +199,7 @@ func calculateStorageLabelsInfo(state *State) ([]string, []string, []float64) {
 func calculateStorageBars(state *State) []BarData {
 	bars := make([]BarData, 0, len(state.dynamic.StorageUsage))
 	for _, storage := range state.dynamic.StorageUsage {
-		info := fmt.Sprintf("%.2f / %.2f GB", storage.UsedGB, storage.UsedGB+storage.FreeGB)
+		info := fmt.Sprintf("%.2f / %.2f GiB", storage.UsedGB, storage.UsedGB+storage.FreeGB)
 		bar := newBarData(storageLabelPrefix+storage.Path, storage.UsedPercent, info)
 		// The end of a mount path tells mounts apart, so a long path is shortened from the left
 		bar.TailStart = len(storageLabelPrefix)
@@ -226,9 +226,9 @@ func calculateGPUBars(state *State) []BarData {
 			total := state.static.GPUTotalGB[gpu.Index]
 			if total > 0 {
 				gpuMemPercent = (gpu.MemUsedGB / total) * percentMultiplier
-				memInfo = fmt.Sprintf("%.2f / %.2f GB", gpu.MemUsedGB, total)
+				memInfo = fmt.Sprintf("%.2f / %.2f GiB", gpu.MemUsedGB, total)
 			} else {
-				memInfo = fmt.Sprintf("%.2f GB", gpu.MemUsedGB)
+				memInfo = fmt.Sprintf("%.2f GiB", gpu.MemUsedGB)
 			}
 		}
 		memLabel := fmt.Sprintf("GPU%d MEM", gpu.Index)

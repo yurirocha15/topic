@@ -136,7 +136,7 @@ func TestProcessGPUMemoryPercentUsesFramebufferShareOfGPU(t *testing.T) {
 
 func TestProcessDetailsShowGPUMemoryUsed(t *testing.T) {
 	details := processDetailsText(ProcessInfo{GPUIndex: 0, GPUUtil: 12, GPUMemPercent: 25, GPUMemMB: 4096})
-	if !strings.Contains(details, "GPU: GPU0 util=12% mem=25.0% (4096 MB)") {
+	if !strings.Contains(details, "GPU: GPU0 util=12% mem=25.0% (4096 MiB)") {
 		t.Fatalf("expected GPU memory used in details, got:\n%s", details)
 	}
 }
