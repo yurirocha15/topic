@@ -182,10 +182,9 @@ type BarData struct {
 
 // GPUProcessInfo holds usage data for a process on a GPU.
 type GPUProcessInfo struct {
-	GPUIndex   int
-	UsedMemMB  uint64
-	GPUUtil    uint64
-	GPUMemUtil uint64
+	GPUIndex  int
+	UsedMemMB uint64 // GPU memory used by the process (pmon fb column)
+	GPUUtil   uint64
 }
 
 // ProcessInfo holds information for a single monitored process.
@@ -202,7 +201,8 @@ type ProcessInfo struct {
 	rawCPU        float64
 	GPUIndex      int
 	GPUUtil       uint64
-	GPUMemPercent float64
+	GPUMemPercent float64 // Share of its GPU's total memory
+	GPUMemMB      uint64
 }
 
 type ProcessSortColumn int

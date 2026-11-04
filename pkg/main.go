@@ -37,7 +37,6 @@ const (
 	borderHeight              = 2                 // Border height for boxes
 	minCPUInfoCount           = 2                 // For cgroup CPU quota/period
 	minGPUUsageCount          = 2                 // For nvidia-smi GPU usage
-	minGPUInfoCount           = 5                 // For nvidia-smi pmon
 	barsPerGPU                = 2                 // GPU utilization and memory bars
 	dynamicCollectorCount     = 12                // Number of dynamic collectors in refreshDynamicState
 	percentMultiplier         = 100.0             // Multiplier for percentage calculations

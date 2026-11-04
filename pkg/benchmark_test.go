@@ -228,10 +228,7 @@ func benchmarkProcessHandles(count int) []ProcessHandle {
 func BenchmarkGetGPUProcessMap(b *testing.B) {
 	runner := MockCommandRunner{
 		outputs: map[string]string{
-			"nvidia-smi pmon -c 1 -s um": `# gpu     pid  type    sm   mem   enc   dec   command
-    0   20131     C    15     8     -     -   python
-    0   20567     C     -     -     -     -   -
-    1   34567     G    22    15     -     -   Xorg`,
+			"nvidia-smi pmon -c 1 -s um": pmonDriver595Output,
 		},
 	}
 

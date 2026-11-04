@@ -328,7 +328,13 @@ func processDetailsText(process ProcessInfo) string {
 	}
 	gpu := "none"
 	if process.GPUIndex >= 0 {
-		gpu = fmt.Sprintf("GPU%d util=%d%% mem=%.1f%%", process.GPUIndex, process.GPUUtil, process.GPUMemPercent)
+		gpu = fmt.Sprintf(
+			"GPU%d util=%d%% mem=%.1f%% (%d MB)",
+			process.GPUIndex,
+			process.GPUUtil,
+			process.GPUMemPercent,
+			process.GPUMemMB,
+		)
 	}
 	return fmt.Sprintf(
 		"PID: %d\nParent PID: %d\nUser: %s\nCPU: %.1f%%\nMemory: %.1f%%\nGPU: %s\nStarted: %s\nThreads: %d\nOpen files: %d\n\nCommand:\n%s",
@@ -595,9 +601,22 @@ func getProcessInfo(
 	if gpuInfo, onGPU := gpuProcessMap[p.PID()]; onGPU {
 		procInfo.GPUIndex = gpuInfo.GPUIndex
 		procInfo.GPUUtil = gpuInfo.GPUUtil
-		procInfo.GPUMemPercent = float64(gpuInfo.GPUMemUtil)
+		procInfo.GPUMemMB = gpuInfo.UsedMemMB
+		procInfo.GPUMemPercent = gpuMemoryPercent(gpuInfo, static)
 	}
 	return procInfo, nil
+}
+
+// gpuMemoryPercent is the process's share of its GPU's total memory, or 0 when the total is unknown.
+func gpuMemoryPercent(gpuInfo GPUProcessInfo, static *StaticInfo) float64 {
+	if static == nil || gpuInfo.GPUIndex < 0 || gpuInfo.GPUIndex >= len(static.GPUTotalGB) {
+		return 0
+	}
+	totalMB := static.GPUTotalGB[gpuInfo.GPUIndex] * bytesPerKB
+	if totalMB <= 0 {
+		return 0
+	}
+	return float64(gpuInfo.UsedMemMB) / totalMB * percentMultiplier
 }
 
 func processParentPID(p ProcessHandle) int32 {

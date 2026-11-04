@@ -1382,10 +1382,11 @@ func TestUpdateProcessListWithProvider(t *testing.T) {
 		ContainerCPULimit:      2,
 		ContainerMemLimitBytes: 4 * bytesPerGB,
 		GPUCount:               1,
+		GPUTotalGB:             []float64{10},
 	}
 	runner := MockCommandRunner{
 		outputs: map[string]string{
-			"nvidia-smi pmon -c 1 -s um": "0 1002 C 70 40 - - python",
+			"nvidia-smi pmon -c 1 -s um": "# gpu pid type sm mem enc dec fb command\n0 1002 C 70 90 - - 4096 python",
 		},
 	}
 	provider := func(workerSeconds, trainSeconds float64) MockProcessProvider {
@@ -1740,11 +1741,11 @@ func TestOSCommandRunnerTimeout(t *testing.T) {
 
 // TestGetGPUProcessMap tests the parsing of nvidia-smi pmon output.
 func TestGetGPUProcessMap(t *testing.T) {
-	mockPmonOutput := `# gpu     pid  type    sm   mem   enc   dec   command
-# Idx       #   C/G     %     %     %     %   name
-    0   20131     C    15     8     -     -   python
-    0   20567     C     -     -     -     -   -
-    1   34567     G    22    15     -     -   Xorg`
+	mockPmonOutput := `# gpu     pid  type    sm   mem   enc   dec    fb   command
+# Idx       #   C/G     %     %     %     %    MB   name
+    0   20131     C    15     8     -     -  1024   python
+    0   20567     C     -     -     -     -     -   -
+    1   34567     G    22    15     -     -   300   Xorg`
 
 	mockRunner := MockCommandRunner{
 		outputs: map[string]string{
@@ -1764,8 +1765,8 @@ func TestGetGPUProcessMap(t *testing.T) {
 	if !ok {
 		t.Fatal("Process with PID 20131 not found in map")
 	}
-	if p1.GPUIndex != 0 || p1.GPUUtil != 15 || p1.GPUMemUtil != 8 {
-		t.Errorf("Process 20131 has incorrect data: got %+v, want {GPUIndex:0 GPUUtil:15 GPUMemUtil:8}", p1)
+	if p1.GPUIndex != 0 || p1.GPUUtil != 15 || p1.UsedMemMB != 1024 {
+		t.Errorf("Process 20131 has incorrect data: got %+v, want {GPUIndex:0 GPUUtil:15 UsedMemMB:1024}", p1)
 	}
 
 	// Check a specific graphics process on a different GPU.
@@ -1773,8 +1774,8 @@ func TestGetGPUProcessMap(t *testing.T) {
 	if !ok {
 		t.Fatal("Process with PID 34567 not found in map")
 	}
-	if p2.GPUIndex != 1 || p2.GPUUtil != 22 || p2.GPUMemUtil != 15 {
-		t.Errorf("Process 34567 has incorrect data: got %+v, want {GPUIndex:1 GPUUtil:22 GPUMemUtil:15}", p2)
+	if p2.GPUIndex != 1 || p2.GPUUtil != 22 || p2.UsedMemMB != 300 {
+		t.Errorf("Process 34567 has incorrect data: got %+v, want {GPUIndex:1 GPUUtil:22 UsedMemMB:300}", p2)
 	}
 
 	// Check a process with no utilization data ('-').
@@ -1782,20 +1783,20 @@ func TestGetGPUProcessMap(t *testing.T) {
 	if !ok {
 		t.Fatal("Process with PID 20567 not found in map")
 	}
-	if p3.GPUIndex != 0 || p3.GPUUtil != 0 || p3.GPUMemUtil != 0 {
-		t.Errorf("Process 20567 has incorrect data: got %+v, want {GPUIndex:0 GPUUtil:0 GPUMemUtil:0}", p3)
+	if p3.GPUIndex != 0 || p3.GPUUtil != 0 || p3.UsedMemMB != 0 {
+		t.Errorf("Process 20567 has incorrect data: got %+v, want {GPUIndex:0 GPUUtil:0 UsedMemMB:0}", p3)
 	}
 }
 
 func TestGetGPUProcessMapSkipsMalformedRows(t *testing.T) {
 	mockRunner := MockCommandRunner{
 		outputs: map[string]string{
-			"nvidia-smi pmon -c 1 -s um": `# gpu pid type sm mem enc dec command
-    bad 20131 C 15 8 - - python
-    0 nope C 15 8 - - python
-    0 20132 C nope 8 - - python
-    0 20133 C 15 nope - - python
-    1 20134 C 22 15 - - python`,
+			"nvidia-smi pmon -c 1 -s um": `# gpu pid type sm mem enc dec fb command
+    bad 20131 C 15 8 - - 100 python
+    0 nope C 15 8 - - 100 python
+    0 20132 C nope 8 - - 100 python
+    0 20133 C 15 8 - - nope python
+    1 20134 C 22 15 - - 100 python`,
 		},
 	}
 
@@ -2065,7 +2066,10 @@ func TestUpdateProcessList(t *testing.T) {
 
 	mockRunner := MockCommandRunner{
 		outputs: map[string]string{
-			"nvidia-smi pmon -c 1 -s um": fmt.Sprintf("0 %d C 50 25 - - test", pid),
+			"nvidia-smi pmon -c 1 -s um": fmt.Sprintf(
+				"# gpu pid type sm mem enc dec fb command\n0 %d C 50 25 - - 4096 test",
+				pid,
+			),
 		},
 	}
 
@@ -2095,7 +2099,7 @@ func TestUpdateProcessList(t *testing.T) {
 				t.Errorf("Expected GPUUtil to be 50, got %d", p.GPUUtil)
 			}
 			if p.GPUMemPercent != 25.0 {
-				t.Errorf("Expected GPUMemPercent to be 25.0, got %f", p.GPUMemPercent)
+				t.Errorf("Expected GPUMemPercent to be 25.0 (4096 MB of 16 GB), got %f", p.GPUMemPercent)
 			}
 			break
 		}
