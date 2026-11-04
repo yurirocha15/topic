@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `topic` uses much less CPU and memory. It reads the process list straight from `/proc`, which takes about a tenth of the time and allocates far less memory. With about 730 processes, its own CPU use dropped from about 9% to about 2.5% of one core.
 - Processes whose user has no account name show the numeric user ID, as `ps` does, instead of `n/a`.
+- While paused, `topic` no longer redraws the screen on every refresh, so it uses almost no CPU.
 
 ## [0.0.4] - 2026-10-31
 

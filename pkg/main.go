@@ -261,9 +261,11 @@ func runTUI(ctx context.Context, app *tview.Application, config AppConfig, state
 				return
 			case <-ticker.C:
 			}
-			if !isPaused(state) {
-				refresh()
+			// While paused nothing changes on a tick; key presses still redraw through the input handler
+			if isPaused(state) {
+				continue
 			}
+			refresh()
 			app.QueueUpdateDraw(render)
 		}
 	}()
