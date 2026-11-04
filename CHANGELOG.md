@@ -17,6 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The mouse now works in the process table and dialogs, as the help already described.
 - The sort arrow now shows the real direction: `↓` is high to low and `↑` is low to high for every column. In sort mode, `↓` and `↑` choose that direction.
 
+### Changed
+
+- `topic` uses much less CPU and memory. It reads the process list straight from `/proc`, which takes about a tenth of the time and allocates far less memory. With about 730 processes, its own CPU use dropped from about 9% to about 2.5% of one core.
+- Processes whose user has no account name show the numeric user ID, as `ps` does, instead of `n/a`.
+
 ## [0.0.4] - 2026-10-31
 
 ### Added

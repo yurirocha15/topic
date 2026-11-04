@@ -125,7 +125,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	useStableProcessStartTimes()
 
 	fileReader := OSFileReader{}
 	cmdRunner := OSCommandRunner{Context: ctx, Timeout: commandTimeout}

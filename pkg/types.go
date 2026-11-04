@@ -294,6 +294,7 @@ type State struct {
 	prevDiskTime time.Time
 
 	processCPU processCPUTracker
+	procfs     *procfsReader
 
 	// followPID is the process the user last highlighted, or 0 when the highlight stays on its row.
 	// It is atomic because table callbacks set it while a render may hold the state lock.

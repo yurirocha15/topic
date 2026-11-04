@@ -31,7 +31,7 @@ func refreshDynamicState(state *State, fs FileReader, runner CommandRunner) {
 		runner,
 		OSHostMetricsProvider{},
 		OSStorageProvider{},
-		OSProcessProvider{},
+		state.processReader(),
 		OSNetworkProvider{},
 		OSDiskIOProvider{},
 	)

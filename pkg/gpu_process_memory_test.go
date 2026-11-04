@@ -116,7 +116,7 @@ func TestProcessGPUMemoryPercentUsesFramebufferShareOfGPU(t *testing.T) {
 			processes := updateProcessListWithProvider(
 				static,
 				pmonRunner(output),
-				OSProcessProvider{},
+				newProcfsReader(procRoot),
 				&processCPUTracker{},
 				time.Now(),
 			)

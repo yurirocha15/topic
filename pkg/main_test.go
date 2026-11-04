@@ -106,7 +106,6 @@ type MockProcessHandle struct {
 	name         string
 	createTime   int64
 	threads      int32
-	openFiles    int
 	err          error
 }
 
@@ -159,14 +158,6 @@ func (mph MockProcessHandle) CreateTime() (int64, error) {
 
 func (mph MockProcessHandle) NumThreads() (int32, error) {
 	return mph.threads, mph.err
-}
-
-func (mph MockProcessHandle) OpenFiles() ([]process.OpenFilesStat, error) {
-	if mph.err != nil {
-		return nil, mph.err
-	}
-	files := make([]process.OpenFilesStat, mph.openFiles)
-	return files, nil
 }
 
 type MockProcessSignaler struct {
@@ -1936,7 +1927,7 @@ func TestUpdateProcessListSkipsGPUProbeWhenNoGPU(t *testing.T) {
 	runner := &CountingCommandRunner{}
 	staticInfo := &StaticInfo{GPUCount: 0}
 
-	_ = updateProcessListWithProvider(staticInfo, runner, OSProcessProvider{}, &processCPUTracker{}, time.Now())
+	_ = updateProcessListWithProvider(staticInfo, runner, newProcfsReader(procRoot), &processCPUTracker{}, time.Now())
 	if runner.calls != 0 {
 		t.Fatalf("Expected no GPU probe calls, got %d", runner.calls)
 	}
@@ -2084,7 +2075,7 @@ func TestUpdateProcessList(t *testing.T) {
 	processList := updateProcessListWithProvider(
 		staticInfo,
 		mockRunner,
-		OSProcessProvider{},
+		newProcfsReader(procRoot),
 		&processCPUTracker{},
 		time.Now(),
 	)

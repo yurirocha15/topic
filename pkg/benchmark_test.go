@@ -321,3 +321,14 @@ func BenchmarkJSONSnapshot(b *testing.B) {
 		_ = writeJSONSnapshot(io.Discard, state)
 	}
 }
+
+// BenchmarkProcessListFromProc reads this machine's processes the way each refresh does.
+func BenchmarkProcessListFromProc(b *testing.B) {
+	static := &StaticInfo{ContainerCPULimit: 1, HostMemTotalGB: 16}
+	reader := newProcfsReader(procRoot)
+	tracker := &processCPUTracker{}
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = updateProcessListWithProvider(static, &CountingCommandRunner{}, reader, tracker, time.Now())
+	}
+}

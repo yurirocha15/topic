@@ -35,6 +35,7 @@
 - Docker, Kubernetes, and NVML integrations must remain optional. Test unavailable, disabled, partial, and success states with fake hooks; keep live integration tests skipped unless explicitly enabled.
 - Use the E2E targets for native-environment validation; `make test-integrations` only proves deterministic behavior and JSON status shape.
 - Avoid long work while holding the dynamic state mutex; collect values first, then publish a snapshot.
+- The process list is read straight from `/proc` (`pkg/procfs.go`). Each refresh reads only `stat` and `cmdline` per process; read `status` once per process and count open files only on demand. Don't route per-process reads back through gopsutil, which costs about ten times more.
 - Process table rows carry their PID as a cell reference. Resolve selection from that PID, not the row index, because the snapshot can change between drawing and a keypress.
 - Keep resource rows on the shared label/percentage/bar/detail grid. At wide widths the two columns must retain a visible divider; narrow layouts must not overflow.
 - Use the shared semantic palette for usage values: green below 70%, gold from 70% to 89.9%, and red at 90% or above.

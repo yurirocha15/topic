@@ -92,8 +92,13 @@ func snapshotFromState(state *State) ExportSnapshot {
 func writeJSONSnapshot(writer io.Writer, state *State) error {
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")
+	snapshot := snapshotFromState(state)
+	for index := range snapshot.Dynamic.Processes {
+		process := &snapshot.Dynamic.Processes[index]
+		process.OpenFileCount = countOpenFiles(procRoot, process.PID)
+	}
 	//nolint:musttag // ExportSnapshot contains exported nested app structs intentionally encoded by field name.
-	return encoder.Encode(snapshotFromState(state))
+	return encoder.Encode(snapshot)
 }
 
 // plainText removes display markup and restores escaped text.

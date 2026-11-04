@@ -258,6 +258,8 @@ func showProcessDetails(pages *tview.Pages, state *State, table *tview.Table) {
 		showMessage(pages, "No process selected")
 		return
 	}
+	// Open files are counted only here, because counting them for every process each refresh is costly
+	process.OpenFileCount = countOpenFiles(procRoot, process.PID)
 	showModal(pages, "process-details", processDetailsText(process), []string{"OK"}, 0, nil)
 }
 

@@ -78,7 +78,6 @@ type ProcessHandle interface {
 	Name() (string, error)
 	CreateTime() (int64, error)
 	NumThreads() (int32, error)
-	OpenFiles() ([]process.OpenFilesStat, error)
 }
 
 // ProcessProvider lists processes from the operating system.
@@ -116,34 +115,6 @@ type DiskIOProvider interface {
 	IOCounters(names ...string) (map[string]disk.IOCountersStat, error)
 }
 
-// OSProcessProvider reads process information through gopsutil.
-type OSProcessProvider struct{}
-
-func (p OSProcessProvider) Processes() ([]ProcessHandle, error) {
-	procs, err := process.Processes()
-	if err != nil {
-		return nil, err
-	}
-	handles := make([]ProcessHandle, 0, len(procs))
-	for _, proc := range procs {
-		handles = append(handles, gopsutilProcessHandle{Process: proc})
-	}
-	return handles, nil
-}
-
-// gopsutilProcessHandle adapts a gopsutil *process.Process to the ProcessHandle interface.
-type gopsutilProcessHandle struct {
-	*process.Process
-}
-
-func (p gopsutilProcessHandle) PID() int32 {
-	return p.Pid
-}
-
-func (p gopsutilProcessHandle) ParentPID() (int32, error) {
-	return p.Ppid()
-}
-
 // OSProcessSignaler sends a signal to a process by PID.
 type OSProcessSignaler struct{}
 
@@ -156,11 +127,7 @@ func (s OSProcessSignaler) Signal(pid int32, startTime time.Time, signal os.Sign
 	}
 	defer func() { _ = proc.Release() }()
 
-	current, err := process.NewProcess(pid)
-	if err != nil {
-		return errProcessChanged
-	}
-	createTime, err := current.CreateTime()
+	createTime, err := readProcessStartTime(procRoot, pid)
 	if err != nil || startTime.IsZero() || createTime != startTime.UnixMilli() {
 		return errProcessChanged
 	}
@@ -168,12 +135,6 @@ func (s OSProcessSignaler) Signal(pid int32, startTime time.Time, signal os.Sign
 		return errProcessChanged
 	}
 	return err
-}
-
-// useStableProcessStartTimes keeps process start times constant during a run. Inside containers
-// gopsutil derives boot time from the clock and uptime, which can differ by a second between reads.
-func useStableProcessStartTimes() {
-	process.EnableBootTimeCache(true)
 }
 
 // OSHostMetricsProvider reads host metrics through gopsutil.

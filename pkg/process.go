@@ -641,17 +641,16 @@ func getProcessInfo(
 	containerCPUPercent, containerMemPercent := computeContainerPercents(cpuPercent, memInfo.RSS, static)
 
 	procInfo := ProcessInfo{
-		PID:           p.PID(),
-		User:          user,
-		CPUPercent:    containerCPUPercent,
-		MemPercent:    containerMemPercent,
-		Command:       cmdline,
-		rawCPU:        cpuPercent,
-		GPUIndex:      -1,
-		ParentPID:     processParentPID(p),
-		StartTime:     processStartTime(p),
-		ThreadCount:   processThreadCount(p),
-		OpenFileCount: processOpenFileCount(p),
+		PID:         p.PID(),
+		User:        user,
+		CPUPercent:  containerCPUPercent,
+		MemPercent:  containerMemPercent,
+		Command:     cmdline,
+		rawCPU:      cpuPercent,
+		GPUIndex:    -1,
+		ParentPID:   processParentPID(p),
+		StartTime:   processStartTime(p),
+		ThreadCount: processThreadCount(p),
 	}
 	if gpuInfo, onGPU := gpuProcessMap[p.PID()]; onGPU {
 		procInfo.GPUIndex = gpuInfo.GPUIndex
@@ -696,12 +695,4 @@ func processThreadCount(p ProcessHandle) int32 {
 		return 0
 	}
 	return threads
-}
-
-func processOpenFileCount(p ProcessHandle) int {
-	files, err := p.OpenFiles()
-	if err != nil {
-		return 0
-	}
-	return len(files)
 }

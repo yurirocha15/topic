@@ -13,7 +13,6 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/shirou/gopsutil/v4/process"
 )
 
 const testSpoofCommand = "[red]evil[-] --flag"
@@ -156,11 +155,17 @@ func TestOSProcessSignalerChecksStartTime(t *testing.T) {
 	t.Cleanup(func() { _ = command.Process.Kill() })
 
 	pid := int32(command.Process.Pid)
-	handle, err := process.NewProcess(pid)
+	// The start time comes from the process list, as it does when the user signals from the table
+	var createTime int64
+	handles, err := newProcfsReader(procRoot).Processes()
 	if err != nil {
-		t.Fatalf("process.NewProcess() error = %v", err)
+		t.Fatalf("Processes() error = %v", err)
 	}
-	createTime, err := handle.CreateTime()
+	for _, handle := range handles {
+		if handle.PID() == pid {
+			createTime, err = handle.CreateTime()
+		}
+	}
 	if err != nil {
 		t.Fatalf("CreateTime() error = %v", err)
 	}
