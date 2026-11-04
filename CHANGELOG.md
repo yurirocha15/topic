@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The network row stays on one interface instead of jumping to whichever was busiest that second. It switches only when another interface carries more than twice the traffic, shows the default-route interface when the network is idle, and its history now follows the interface it names.
 - Resource details, such as `2.00 CPU limit` and `1.77 / 2.00 GiB`, are drawn in the normal text color instead of dim gray, which was hard to read on many terminal themes.
 - When a filter matches nothing, the process table says so and how to clear the filter, instead of showing an empty table.
+- Help, the side panel, and the README now list the same keys. Help groups them by where they work and adds the ones it left out: `r` to reverse the sort, Page Up/Down and Home/End in the process table, `Enter` to leave filter and sort mode, and the dialog keys. The side panel now shows `r reverse` and `k signal`.
 
 ### Changed
 

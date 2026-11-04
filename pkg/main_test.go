@@ -677,7 +677,7 @@ func TestUpdateInfoView(t *testing.T) {
 	if height <= 0 {
 		t.Fatalf("Expected positive ASCII info view height, got %d", height)
 	}
-	if !strings.Contains(text, "░████") || !strings.Contains(text, "Logo: a") {
+	if !strings.Contains(text, "░████") || !strings.Contains(text, "a logo") {
 		t.Fatalf("ASCII info view did not show logo or toggle help: %q", text)
 	}
 }

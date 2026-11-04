@@ -241,23 +241,7 @@ const (
 
 // showHelp opens the key list in a left-aligned box that scrolls when the terminal is short.
 func showHelp(pages *tview.Pages) {
-	text := `topic controls
-
-q / Ctrl+C    quit
-↑↓←→ / mouse  navigate process table
-/             filter processes
-s             sort mode
-←/→           choose sort column in sort mode
-↑/↓           choose sort direction in sort mode
-r             reverse sort outside sort mode
-Esc           leave sort/filter mode
-Ctrl+U        clear filter in filter mode
-p             pause refresh
-t             toggle process tree
-a             toggle ASCII art
-Enter         process details
-k             signal selected process
-?             this help`
+	text := helpText()
 	view := tview.NewTextView().SetText(text).SetScrollable(true).SetWrap(false)
 	view.SetBorder(true).SetTitle(" Help: ↑↓ PgUp PgDn scroll, Esc close ")
 

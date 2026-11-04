@@ -55,7 +55,8 @@ func (tui *helpTUI) text(t *testing.T) string {
 func TestHelpShowsKeysLeftAlignedOnOneLineEach(t *testing.T) {
 	tui := startHelpTUI(t, 80, 24)
 	text := tui.text(t)
-	for _, want := range []string{"q / Ctrl+C    quit", "k             signal selected process"} {
+	// The first lines of help fit on an 80x24 screen
+	for _, want := range strings.Split(helpText(), "\n")[:10] {
 		if !strings.Contains(text, want) {
 			t.Errorf("expected help line %q on one line:\n%s", want, text)
 		}
@@ -64,13 +65,14 @@ func TestHelpShowsKeysLeftAlignedOnOneLineEach(t *testing.T) {
 
 func TestHelpScrollsOnShortTerminals(t *testing.T) {
 	tui := startHelpTUI(t, 60, 12)
-	if strings.Contains(tui.text(t), "this help") {
+	if strings.Contains(tui.text(t), "close the dialog") {
 		t.Fatal("expected the last help line to be below the fold on a 12-row terminal")
 	}
-	tui.screen.InjectKey(tcell.KeyPgDn, 0, tcell.ModNone)
-	tui.screen.InjectKey(tcell.KeyPgDn, 0, tcell.ModNone)
+	for range strings.Count(helpText(), "\n") {
+		tui.screen.InjectKey(tcell.KeyPgDn, 0, tcell.ModNone)
+	}
 	waitForTUICondition(t, tui.app, func() bool {
-		return strings.Contains(simulationScreenText(tui.screen), "this help")
+		return strings.Contains(simulationScreenText(tui.screen), "close the dialog")
 	}, "Page Down to reach the end of help")
 }
 

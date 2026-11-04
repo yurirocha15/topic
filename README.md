@@ -100,16 +100,31 @@ topic --version          # print the version and exit
 
 #### Controls
 
-* **Quit:** `q` or `Ctrl+C`
-* **Navigate:** Use the arrow keys (`←`, `↑`, `→`, `↓`) or the mouse to move through the process list. Once you select a process, the highlight follows it when the list re-sorts.
-* **Filter mode:** `/` to enter, type to filter, `Ctrl+U` to clear, `Esc` to leave.
-* **Sort mode:** `s` to enter, `←`/`→` to choose a column, `↓` for high to low or `↑` for low to high, `Esc` to leave.
-* **Process details:** `Enter`
-* **Signal process:** `k` (`Enter` and `k` act on the PID shown in the highlighted row). `Cancel` is selected when the dialog opens; use `←`/`→` to choose `SIGTERM` or `SIGKILL`.
-* **Pause refresh:** `p`
-* **Tree view:** `t` (shows process tree order instead of the selected sort)
-* **Toggle logo:** `a`
-* **Help:** `?`
+Press `?` in `topic` to see the same list. Once you pick a process, the highlight follows it when the list re-sorts, and `Enter` and `k` act on the PID shown in the highlighted row.
+
+| Where | Keys | Action |
+| --- | --- | --- |
+| General | `q / Ctrl+C` | quit |
+| General | `?` | show or close the key help |
+| General | `p` | pause or resume refreshing |
+| General | `a` | show or hide the logo |
+| Process table | `↑↓ PgUp PgDn Home End` | move the highlight (or click a row) |
+| Process table | `← →` | scroll the table sideways |
+| Process table | `Enter` | details of the highlighted process |
+| Process table | `k` | signal the highlighted process |
+| Process table | `/` | filter by command, user, or PID |
+| Process table | `s` | choose the sort column and direction |
+| Process table | `r` | reverse the sort |
+| Process table | `t` | show or hide the process tree |
+| Filter mode | `Backspace` | delete the last character |
+| Filter mode | `Ctrl+U` | clear the filter |
+| Filter mode | `Enter / Esc` | stop typing and keep the filter |
+| Sort mode | `← →` | choose the sort column |
+| Sort mode | `↓ / ↑` | sort high to low / low to high |
+| Sort mode | `Enter / Esc` | leave sort mode |
+| Dialogs | `← → / Tab` | choose a button (starts on Cancel) |
+| Dialogs | `Enter` | press the chosen button |
+| Dialogs | `Esc / q` | close the dialog |
 
 ---
 

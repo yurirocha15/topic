@@ -282,17 +282,7 @@ func updateInfoView(view *tview.TextView, state *State) int {
 `
 	subTitle := "\n       [::b]top inside a container"
 	integrations := integrationStatusText(state.static.Integrations)
-	guide := `
-` + integrations + `
-
-[darkgrey]      Quit: q, Ctrl+C
-[darkgrey] Sort mode: s  Reverse: r
-[darkgrey]Filter mode: /  Clear: Ctrl+U
-[darkgrey]     Pause: p  Tree: t  Logo: a
-[darkgrey]   Details: Enter  Signal: k
-[darkgrey]      Help: ?
-[darkgrey]  Navigate: ←↑→↓ / Mouse
-[darkgrey]                        `
+	guide := "\n" + integrations + "\n\n" + strings.Join(keyHintLines(), "\n") + "\n"
 
 	fullText := asciiArt + subTitle + guide
 	view.SetText(fullText)
@@ -319,9 +309,7 @@ func compactInfoText(ui UIState, statuses []IntegrationStatus) string {
 			themeMutedTag+"Mode "+themeResetTag+"%s  "+themeMutedTag+"Sort "+themeResetTag+"%s  "+
 			themeMutedTag+"Filter "+themeResetTag+"%s\n"+
 			"%s\n"+
-			themeMutedTag+"Keys  "+themeResetTag+"q quit  p pause  ? help\n"+
-			themeMutedTag+"Modes "+themeResetTag+"/ filter  s sort  t tree\n"+
-			themeMutedTag+"View  "+themeResetTag+"Enter details  a logo\n",
+			strings.Join(keyHintLines(), "\n")+"\n",
 		infoModeText(ui),
 		sortStatusText(ui),
 		filterStatusText(ui),
