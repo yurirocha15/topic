@@ -200,11 +200,11 @@ func handleSortInput(event *tcell.EventKey, state *State) {
 		})
 	case tcell.KeyLeft:
 		updateUIState(state, func(ui *UIState) {
-			ui.ProcessSort = previousProcessSortColumn(ui.ProcessSort)
+			ui.ProcessSort = previousProcessSortColumn(ui.ProcessSort, state.static.GPUCount > 0)
 		})
 	case tcell.KeyRight:
 		updateUIState(state, func(ui *UIState) {
-			ui.ProcessSort = nextProcessSortColumn(ui.ProcessSort)
+			ui.ProcessSort = nextProcessSortColumn(ui.ProcessSort, state.static.GPUCount > 0)
 		})
 	case tcell.KeyUp:
 		updateUIState(state, func(ui *UIState) {

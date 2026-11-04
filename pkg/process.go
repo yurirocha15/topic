@@ -54,79 +54,26 @@ func updateProcessTable(table *tview.Table, state *State) {
 
 	previousRow, _ := table.GetSelection()
 
+	showGPU := state.static.GPUCount > 0
+	columns := processColumnsFor(showGPU)
+
 	// --- Create Header ---
-	headers := processTableHeaders(ui)
-	for i, header := range headers {
+	sortPosition := processColumnPosition(processSortHeaderIndex(ui.ProcessSort), showGPU)
+	for position, header := range processTableHeaders(ui, showGPU) {
 		color := tcell.ColorLightGray
-		if i == processSortHeaderIndex(ui.ProcessSort) {
+		if position == sortPosition {
 			color = tcell.ColorAqua
 		}
-		setTableCell(table, 0, i, header, color, false, 0)
+		setTableCell(table, 0, position, header, color, false, 0)
 	}
 
 	// --- Populate Data ---
 	for r, p := range processes {
-		// PID
-		columnIdx := 0
-		setTableCell(table, r+1, columnIdx, strconv.Itoa(int(p.PID)), tcell.ColorGray, true, 0)
-		table.GetCell(r+1, processPIDColumn).SetReference(p.PID)
-		// USER
-		columnIdx++
-		setTableCell(table, r+1, columnIdx, p.User, tcell.ColorLightGray, true, 0)
-		// %CPU
-		columnIdx++
-		setTableCell(
-			table,
-			r+1,
-			columnIdx,
-			strconv.FormatFloat(p.CPUPercent, 'f', 1, 64),
-			usageCellColor(p.CPUPercent),
-			true,
-			0,
-		)
-		// %MEM
-		columnIdx++
-		setTableCell(
-			table,
-			r+1,
-			columnIdx,
-			strconv.FormatFloat(p.MemPercent, 'f', 1, 64),
-			usageCellColor(p.MemPercent),
-			true,
-			0,
-		)
-
-		// %GPU and %GPUMEM
-		columnIdx++
-		if p.GPUIndex != -1 {
-			setTableCell(
-				table,
-				r+1,
-				columnIdx,
-				strconv.FormatUint(p.GPUUtil, 10),
-				usageCellColor(float64(p.GPUUtil)),
-				true,
-				0,
-			)
-			columnIdx++
-			setTableCell(
-				table,
-				r+1,
-				columnIdx,
-				strconv.FormatFloat(p.GPUMemPercent, 'f', 1, 64),
-				usageCellColor(p.GPUMemPercent),
-				true,
-				0,
-			)
-		} else {
-			setTableCell(table, r+1, columnIdx, "-", tcell.ColorDarkGray, true, 0)
-			columnIdx++
-			setTableCell(table, r+1, columnIdx, "-", tcell.ColorDarkGray, true, 0)
+		for position, column := range columns {
+			text, color, expansion := processCellContent(p, column)
+			setTableCell(table, r+1, position, text, color, true, expansion)
 		}
-
-		// COMMAND
-		columnIdx++
-		setTableCell(table, r+1, columnIdx, p.Command, tcell.ColorWhite, true, 1)
+		table.GetCell(r+1, processPIDColumn).SetReference(p.PID)
 	}
 
 	for row := table.GetRowCount() - 1; row > len(processes); row-- {
@@ -166,6 +113,47 @@ func restoreProcessSelection(table *tview.Table, state *State, processes []Proce
 	}
 	// Moving the highlight here is not a choice by the user, so stop following
 	state.followPID.Store(0)
+}
+
+// processColumnsFor lists the table's columns in order. The GPU columns appear only with a GPU.
+func processColumnsFor(showGPU bool) []int {
+	if showGPU {
+		return []int{
+			processPIDColumn, processUserColumn, processCPUColumn, processMemColumn,
+			processGPUColumn, processGPUMemColumn, processCommandColumn,
+		}
+	}
+	return []int{processPIDColumn, processUserColumn, processCPUColumn, processMemColumn, processCommandColumn}
+}
+
+// processColumnPosition is where a column is drawn, or -1 when it is hidden.
+func processColumnPosition(column int, showGPU bool) int {
+	return slices.Index(processColumnsFor(showGPU), column)
+}
+
+func processCellContent(p ProcessInfo, column int) (string, tcell.Color, int) {
+	switch column {
+	case processPIDColumn:
+		return strconv.Itoa(int(p.PID)), tcell.ColorGray, 0
+	case processUserColumn:
+		return p.User, tcell.ColorLightGray, 0
+	case processCPUColumn:
+		return strconv.FormatFloat(p.CPUPercent, 'f', 1, 64), usageCellColor(p.CPUPercent), 0
+	case processMemColumn:
+		return strconv.FormatFloat(p.MemPercent, 'f', 1, 64), usageCellColor(p.MemPercent), 0
+	case processGPUColumn:
+		if p.GPUIndex == -1 {
+			return "-", tcell.ColorDarkGray, 0
+		}
+		return strconv.FormatUint(p.GPUUtil, 10), usageCellColor(float64(p.GPUUtil)), 0
+	case processGPUMemColumn:
+		if p.GPUIndex == -1 {
+			return "-", tcell.ColorDarkGray, 0
+		}
+		return strconv.FormatFloat(p.GPUMemPercent, 'f', 1, 64), usageCellColor(p.GPUMemPercent), 0
+	default:
+		return p.Command, tcell.ColorWhite, 1
+	}
 }
 
 func setTableCell(
@@ -314,19 +302,23 @@ func treeCommand(command string, depth int) string {
 	return strings.Repeat("  ", depth) + "└─ " + command
 }
 
-func processTableHeaders(ui UIState) []string {
-	headers := []string{
-		processPIDLabel,
-		processUserLabel,
-		processCPULabel,
-		processMemoryLabel,
-		processGPULabel,
-		processGPUMemoryLabel,
-		processCommandLabel,
+func processTableHeaders(ui UIState, showGPU bool) []string {
+	labels := map[int]string{
+		processPIDColumn:     processPIDLabel,
+		processUserColumn:    processUserLabel,
+		processCPUColumn:     processCPULabel,
+		processMemColumn:     processMemoryLabel,
+		processGPUColumn:     processGPULabel,
+		processGPUMemColumn:  processGPUMemoryLabel,
+		processCommandColumn: processCommandLabel,
 	}
-	sortIndex := processSortHeaderIndex(ui.ProcessSort)
-	if sortIndex >= 0 && sortIndex < len(headers) {
-		headers[sortIndex] += sortDirectionMarker(ui)
+	columns := processColumnsFor(showGPU)
+	headers := make([]string, 0, len(columns))
+	for _, column := range columns {
+		headers = append(headers, labels[column])
+	}
+	if position := processColumnPosition(processSortHeaderIndex(ui.ProcessSort), showGPU); position >= 0 {
+		headers[position] += sortDirectionMarker(ui)
 	}
 	return headers
 }
@@ -463,7 +455,25 @@ func processTableTitle(ui UIState, visibleCount int, totalCount int) string {
 	return strings.Join(parts, " ") + " "
 }
 
-func nextProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
+// nextProcessSortColumn moves sort mode one column right, skipping hidden GPU columns.
+func nextProcessSortColumn(current ProcessSortColumn, showGPU bool) ProcessSortColumn {
+	next := nextSortColumnInTable(current)
+	for !showGPU && (next == SortByGPU || next == SortByGPUMemory) {
+		next = nextSortColumnInTable(next)
+	}
+	return next
+}
+
+// previousProcessSortColumn moves sort mode one column left, skipping hidden GPU columns.
+func previousProcessSortColumn(current ProcessSortColumn, showGPU bool) ProcessSortColumn {
+	previous := previousSortColumnInTable(current)
+	for !showGPU && (previous == SortByGPU || previous == SortByGPUMemory) {
+		previous = previousSortColumnInTable(previous)
+	}
+	return previous
+}
+
+func nextSortColumnInTable(current ProcessSortColumn) ProcessSortColumn {
 	switch current {
 	case SortByCPU:
 		return SortByMemory
@@ -484,7 +494,7 @@ func nextProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
 	}
 }
 
-func previousProcessSortColumn(current ProcessSortColumn) ProcessSortColumn {
+func previousSortColumnInTable(current ProcessSortColumn) ProcessSortColumn {
 	switch current {
 	case SortByCPU:
 		return SortByUser

@@ -926,6 +926,7 @@ func simulationScreenRows(screen tcell.SimulationScreen) []string {
 func TestUpdateProcessTable(t *testing.T) {
 	table := tview.NewTable()
 	state := &State{
+		static: StaticInfo{GPUCount: 1},
 		dynamic: DynamicInfo{
 			Processes: []ProcessInfo{
 				{PID: 123, User: "alice", CPUPercent: 12.5, MemPercent: 30, Command: "topic", GPUIndex: -1},
@@ -1148,11 +1149,11 @@ func TestSortModeFollowsTableColumnOrder(t *testing.T) {
 	}
 	for i, column := range order {
 		next := order[(i+1)%len(order)]
-		if got := nextProcessSortColumn(column); got != next {
+		if got := nextProcessSortColumn(column, true); got != next {
 			t.Fatalf("next sort after %v = %v, want %v", column, got, next)
 		}
 		prev := order[(i+len(order)-1)%len(order)]
-		if got := previousProcessSortColumn(column); got != prev {
+		if got := previousProcessSortColumn(column, true); got != prev {
 			t.Fatalf("previous sort before %v = %v, want %v", column, got, prev)
 		}
 	}

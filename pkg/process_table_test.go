@@ -54,7 +54,7 @@ func TestTreeModeWithDefaultSortPrefixesChildCommandsWithTreeMarker(t *testing.T
 		3: treeCommand("grandchild-hot", 1),
 		4: treeCommand("child", 1),
 	} {
-		if got := table.GetCell(row, processCommandColumn).Text; got != want {
+		if got := table.GetCell(row, processColumnPosition(processCommandColumn, false)).Text; got != want {
 			t.Errorf("row %d command = %q, want %q", row, got, want)
 		}
 	}
@@ -193,7 +193,7 @@ func TestTreeModeWithFilterBuildsTreeFromFilteredRowsOnly(t *testing.T) {
 		t.Fatalf("PIDs = %v, want %v", got, want)
 	}
 	for row, want := range map[int]string{1: "grandchild-hot", 2: "child"} {
-		if got := table.GetCell(row, processCommandColumn).Text; got != want {
+		if got := table.GetCell(row, processColumnPosition(processCommandColumn, false)).Text; got != want {
 			t.Errorf("row %d command = %q, want %q", row, got, want)
 		}
 	}

@@ -294,7 +294,7 @@ func TestURLTagsAreShownLiterally(t *testing.T) {
 			updateProcessTable(table, state)
 			assertOnScreen(t, drawOnScreen(t, table), payload)
 
-			cell := table.GetCell(1, processCommandColumn)
+			cell := table.GetCell(1, processColumnPosition(processCommandColumn, false))
 			if got := plainText(cell.Text); got != payload {
 				t.Errorf("plainText() = %q, want %q", got, payload)
 			}

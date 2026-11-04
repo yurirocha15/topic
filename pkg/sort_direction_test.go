@@ -22,7 +22,7 @@ func TestProcessTableSortMarkerShowsActualDirection(t *testing.T) {
 	}
 	for _, tt := range tests {
 		ui := UIState{ProcessSort: tt.sort, ReverseSort: tt.reverse}
-		headers := processTableHeaders(ui)
+		headers := processTableHeaders(ui, true)
 		if !strings.Contains(strings.Join(headers, " "), tt.header) {
 			t.Errorf("sort %v reverse=%v: expected header %q, got %v", tt.sort, tt.reverse, tt.header, headers)
 		}
