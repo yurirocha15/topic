@@ -79,6 +79,9 @@ func updateProcessTable(table *tview.Table, state *State) {
 	for row := table.GetRowCount() - 1; row > len(processes); row-- {
 		table.RemoveRow(row)
 	}
+	if len(processes) == 0 {
+		writeEmptyProcessMessage(table, columns, ui.ProcessFilter)
+	}
 	restoreProcessSelection(table, state, processes, previousRow)
 
 	table.SetTitle(escapeText(processTableTitle(ui, len(processes), totalProcesses)))
@@ -113,6 +116,19 @@ func restoreProcessSelection(table *tview.Table, state *State, processes []Proce
 	}
 	// Moving the highlight here is not a choice by the user, so stop following
 	state.followPID.Store(0)
+}
+
+// writeEmptyProcessMessage fills the first row with a muted, unselectable note saying why the table
+// is empty, so an empty filter result does not look like a broken table.
+func writeEmptyProcessMessage(table *tview.Table, columns []int, filter string) {
+	message := "No processes to show"
+	if filter != "" {
+		message = fmt.Sprintf("No processes match %q. Press / then Ctrl+U to clear the filter.", filter)
+	}
+	for position := range columns {
+		setTableCell(table, 1, position, "", tcell.ColorGray, false, 0)
+	}
+	setTableCell(table, 1, len(columns)-1, message, tcell.ColorGray, false, 1)
 }
 
 // processColumnsFor lists the table's columns in order. The GPU columns appear only with a GPU.
