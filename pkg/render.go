@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rivo/tview"
+	"github.com/rivo/uniseg"
 )
 
 func updateResourceView(view *tview.TextView, state *State) int {
@@ -401,7 +402,7 @@ func writeMetricLine(
 	valueWidthAvailable := max(0, availableWidth-labelWidth-metricFieldSpacing)
 	value = truncatePlainText(value, valueWidthAvailable)
 
-	trendWidth := valueWidthAvailable - visibleRuneCount(value)
+	trendWidth := valueWidthAvailable - plainCellWidth(value)
 	if value != "" && trend != "" {
 		trendWidth -= metricFieldSpacing
 	}
@@ -635,22 +636,33 @@ func formatUsagePercent(percent float64) string {
 	return "[" + usageColorName(percent) + "]" + value + themeResetTag
 }
 
+// truncatePlainText shortens text to at most width terminal cells, ending it with "…" when cut.
+// Width is measured in cells, so wide characters count twice and combining marks stay attached.
 func truncatePlainText(value string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	runes := []rune(value)
-	if len(runes) <= width {
+	if plainCellWidth(value) <= width {
 		return value
 	}
-	if width == 1 {
-		return "…"
+	var builder strings.Builder
+	used := 0
+	state := -1
+	for rest := value; rest != ""; {
+		var cluster string
+		var clusterWidth int
+		cluster, rest, clusterWidth, state = uniseg.FirstGraphemeClusterInString(rest, state)
+		if used+clusterWidth > width-1 {
+			break
+		}
+		builder.WriteString(cluster)
+		used += clusterWidth
 	}
-	return string(runes[:width-1]) + "…"
+	return builder.String() + "…"
 }
 
 func padPlainText(value string, width int) string {
-	padding := width - visibleRuneCount(value)
+	padding := width - plainCellWidth(value)
 	if padding <= 0 {
 		return value
 	}
@@ -673,8 +685,9 @@ func plainTextWidth(value string) int {
 	return tview.TaggedStringWidth(escapeText(value))
 }
 
-func visibleRuneCount(value string) int {
-	return len([]rune(value))
+// plainCellWidth is the number of terminal cells plain text takes up.
+func plainCellWidth(value string) int {
+	return uniseg.StringWidth(value)
 }
 
 // makeBar creates a visual bar representation of a percentage.

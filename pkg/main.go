@@ -392,9 +392,7 @@ func filterStatusText(ui UIState) string {
 	}
 	filter := ui.ProcessFilter
 	const maxFilterStatusWidth = 13
-	if len([]rune(filter)) > maxFilterStatusWidth {
-		filter = string([]rune(filter)[:maxFilterStatusWidth-1]) + "…"
-	}
+	filter = truncatePlainText(filter, maxFilterStatusWidth)
 	return themeAttentionTag + escapeText(filter) + themeResetTag
 }
 
