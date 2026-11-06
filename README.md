@@ -63,6 +63,8 @@ or for containers based on `alpine`:
 wget -qO- https://raw.githubusercontent.com/yurirocha15/topic/main/install.sh | sh
 ```
 
+On a machine with an NVIDIA driver and glibc, the script installs the NVML build (`topic-linux-<arch>-nvml`), which reads GPU usage directly from the driver library and uses about half the CPU of the static build. Everywhere else, including Alpine, it installs the static build (`topic-linux-<arch>`), which runs in any Linux container. To always install the static build, run the script with `TOPIC_BUILD=static`, as in `curl -s https://raw.githubusercontent.com/yurirocha15/topic/main/install.sh | TOPIC_BUILD=static bash`.
+
 The script will attempt to install to `/usr/local/bin` (prompting for `sudo` if needed). If that fails, it will fall back to `$HOME/.local/bin` and notify you if you need to add this directory to your `PATH`.
 
 The script checks the download against the release's `SHA256SUMS` file. To confirm that a binary was built by this repository's release workflow, verify its attestation with the GitHub CLI:
@@ -88,7 +90,7 @@ topic --refresh=2s        # change refresh interval
 topic --no-gpu           # disable GPU collection
 topic --no-docker        # disable Docker metadata lookup
 topic --no-kubernetes    # disable Kubernetes metadata lookup
-topic --no-nvml          # disable NVML/NVIDIA integration status
+topic --no-nvml          # read GPU usage with nvidia-smi instead of NVML
 topic --ascii            # start with the large ASCII logo visible
 topic --once             # print one text snapshot and exit
 topic --once --json      # print one JSON snapshot for scripts

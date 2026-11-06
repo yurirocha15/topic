@@ -58,15 +58,43 @@ case $ARCH in
 esac
 info "Architecture detected: $ARCH"
 
-# 2. Find the latest release URL.
+# 2. Choose the build. The nvml build reads GPU usage with less CPU but needs glibc, so it is
+# chosen only when both glibc and the NVIDIA driver are present. Set TOPIC_BUILD=static to skip it.
+case $ARCH in
+    amd64) GLIBC_LOADER="/lib64/ld-linux-x86-64.so.2" ;;
+    arm64) GLIBC_LOADER="/lib/ld-linux-aarch64.so.1" ;;
+esac
+STATIC_ASSET="topic-linux-${ARCH}"
+NVML_ASSET=""
+if [ "${TOPIC_BUILD:-}" != "static" ] && [ -e "$GLIBC_LOADER" ] && [ -e /proc/driver/nvidia/version ]; then
+    NVML_ASSET="${STATIC_ASSET}-nvml"
+fi
+
+# 3. Find the latest release URL.
 info "Fetching latest release information from GitHub..."
-API_URL="https://api.github.com/repos/$REPO/releases/latest"
-# Use jq if available for more robust JSON parsing, otherwise fall back to grep/cut.
-if command -v jq >/dev/null 2>&1; then
-    DOWNLOAD_URL=$(http_get "$API_URL" | jq -r ".assets[] | select(.name | contains(\"linux-${ARCH}\")) | .browser_download_url")
-else
+RELEASE_JSON=$(http_get "https://api.github.com/repos/$REPO/releases/latest")
+if ! command -v jq >/dev/null 2>&1; then
     warn "jq is not installed. Falling back to grep, which may be less reliable."
-    DOWNLOAD_URL=$(http_get "$API_URL" | grep "browser_download_url.*-linux-${ARCH}" | cut -d '"' -f 4)
+fi
+
+# asset_url prints the download URL of the release asset with exactly this name, if there is one.
+asset_url() {
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$RELEASE_JSON" | jq -r --arg name "$1" '.assets[] | select(.name == $name) | .browser_download_url'
+    else
+        printf '%s' "$RELEASE_JSON" | grep "\"browser_download_url\": *\"[^\"]*/$1\"" | cut -d '"' -f 4
+    fi
+}
+
+DOWNLOAD_URL=""
+if [ -n "$NVML_ASSET" ]; then
+    DOWNLOAD_URL=$(asset_url "$NVML_ASSET")
+    if [ -n "$DOWNLOAD_URL" ]; then
+        info "NVIDIA driver found; installing the NVML build."
+    fi
+fi
+if [ -z "$DOWNLOAD_URL" ]; then
+    DOWNLOAD_URL=$(asset_url "$STATIC_ASSET")
 fi
 
 if [ -z "$DOWNLOAD_URL" ]; then
@@ -74,7 +102,7 @@ if [ -z "$DOWNLOAD_URL" ]; then
 fi
 info "Found download URL: $DOWNLOAD_URL"
 
-# 3. Download the binary to a temporary file.
+# 4. Download the binary to a temporary file.
 info "Downloading binary..."
 TMP_FILE=$(mktemp)
 http_get "$DOWNLOAD_URL" > "$TMP_FILE"
@@ -95,7 +123,7 @@ fi
 
 chmod +x "$TMP_FILE"
 
-# 4. Determine install location and install.
+# 5. Determine install location and install.
 INSTALL_DIR=""
 if [ -w "$PRIMARY_INSTALL_DIR" ]; then
     INSTALL_DIR="$PRIMARY_INSTALL_DIR"
@@ -123,7 +151,7 @@ else
     esac
 fi
 
-# 5. Clean up and verify.
+# 6. Clean up and verify.
 rm -f "$TMP_FILE"
 info "Verifying installation..."
 if ! command -v "$BINARY_NAME" >/dev/null 2>&1; then

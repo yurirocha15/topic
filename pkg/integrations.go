@@ -27,6 +27,7 @@ const (
 	integrationDocker        = "docker"
 	integrationKubernetes    = "kubernetes"
 	integrationNVML          = "nvml"
+	nvmlInUseDetail          = "GPU usage read through NVML"
 	integrationDisabled      = "disabled"
 	integrationUnavailable   = "unavailable"
 	integrationAvailable     = "available"
@@ -341,6 +342,16 @@ func discoverNVMLStatusWithProbe(config AppConfig, probe integrationProbe) Integ
 		}
 	}
 	return IntegrationStatus{Name: integrationNVML, Detail: integrationUnavailable}
+}
+
+// markNVMLInUse reports that GPU usage comes from NVML instead of nvidia-smi.
+func markNVMLInUse(statuses []IntegrationStatus) {
+	for index := range statuses {
+		if statuses[index].Name == integrationNVML {
+			statuses[index].Available = true
+			statuses[index].Detail = nvmlInUseDetail
+		}
+	}
 }
 
 func defaultIntegrationProbe() integrationProbe {

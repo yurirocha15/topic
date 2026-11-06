@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `topic` uses much less CPU and memory. It reads the process list straight from `/proc`, which takes about a tenth of the time and allocates far less memory. With about 730 processes, its own CPU use dropped from about 9% to about 2.5% of one core.
 - Processes whose user has no account name show the numeric user ID, as `ps` does, instead of `n/a`.
 - While paused, `topic` no longer redraws the screen on every refresh, so it uses almost no CPU.
+- Releases now include an NVML build, `topic-linux-<arch>-nvml`, for machines with an NVIDIA GPU. It reads GPU usage directly from the NVIDIA driver library instead of starting `nvidia-smi`, which cuts `topic`'s total CPU use by more than half on a GPU machine (from about 7.9% to about 3.6% of one core in our measurement). It needs glibc, so the install script picks it only when the NVIDIA driver and glibc are present. The static `topic-linux-<arch>` binary still runs anywhere, including Alpine. In the NVML build, `--no-nvml` switches back to `nvidia-smi`.
 - On machines with an NVIDIA GPU, the dashboard keeps one `nvidia-smi` running for GPU usage instead of starting a new one every refresh, which saves about 2% of a core.
 
 ## [0.0.4] - 2026-10-31

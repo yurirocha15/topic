@@ -65,9 +65,11 @@ jobs:
 
       - name: Run tests
         working-directory: ./pkg
-        run: go test ./...
+        run: |
+          go test ./...
+          go test -tags nvml ./...
 
-  # Builds and runs the binary on a native runner for each architecture.
+  # Builds and runs the binaries on a native runner for each architecture.
   build:
     name: Build for Linux (${{ matrix.arch }})
     needs: prepare
@@ -93,37 +95,47 @@ jobs:
           go-version-file: 'pkg/go.mod'
           cache-dependency-path: 'pkg/go.sum'
 
-      - name: Build static binary
+      - name: Build binaries
         working-directory: ./pkg
         env:
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
-          # IMPORTANT: Create a static binary for maximum compatibility (e.g., running on Alpine images).
+          # Without cgo, the default build is static and runs anywhere, including Alpine and scratch images.
+          # The nvml build loads libnvidia-ml at runtime, which makes it depend on glibc.
           CGO_ENABLED: 0
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           # -ldflags="-s -w" strips the binary to make it smaller.
           # -X main.Version=... injects the Git tag as a version string.
           go build -v -ldflags="-s -w -X main.Version=${TAG}" -o "../topic-${GOOS}-${GOARCH}" .
+          go build -v -tags nvml -ldflags="-s -w -X main.Version=${TAG}" -o "../topic-${GOOS}-${GOARCH}-nvml" .
 
-      - name: Run the built binary
+      - name: Run the built binaries
         env:
-          BINARY: ./topic-linux-${{ matrix.arch }}
+          ARCH: ${{ matrix.arch }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          version="$("$BINARY" --version)"
-          if [[ "$version" != "topic $TAG" ]]; then
-            echo "::error::Expected version 'topic $TAG', got '$version'."
+          if readelf -l "./topic-linux-$ARCH" | grep -q 'program interpreter'; then
+            echo "::error::topic-linux-$ARCH must be a static binary."
             exit 1
           fi
-          "$BINARY" --once --json > snapshot.json
-          python3 -c 'import json, sys; json.load(open(sys.argv[1]))' snapshot.json
+          for binary in "./topic-linux-$ARCH" "./topic-linux-$ARCH-nvml"; do
+            version="$("$binary" --version)"
+            if [[ "$version" != "topic $TAG" ]]; then
+              echo "::error::Expected $binary version 'topic $TAG', got '$version'."
+              exit 1
+            fi
+            "$binary" --once --json > snapshot.json
+            python3 -c 'import json, sys; json.load(open(sys.argv[1]))' snapshot.json
+          done
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: topic-linux-${{ matrix.arch }}
-          path: topic-linux-${{ matrix.arch }}
+          path: |
+            topic-linux-${{ matrix.arch }}
+            topic-linux-${{ matrix.arch }}-nvml
 
   # Gathers the built artifacts and publishes them with the changelog notes.
   release:

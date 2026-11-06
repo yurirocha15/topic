@@ -26,6 +26,20 @@ build:
 	@mkdir -p $(OUTPUT_DIR)
 	(cd $(MODULE_PATH) && CGO_ENABLED=0 $(GOBUILD) -v -ldflags="-s -w" -o ../$(OUTPUT_DIR)/$(BINARY_NAME) .)
 
+# build-nvml builds dist/topic-nvml, which reads GPU usage through NVML and needs glibc.
+build-nvml:
+	@echo "Building the NVML application..."
+	@mkdir -p $(OUTPUT_DIR)
+	(cd $(MODULE_PATH) && CGO_ENABLED=0 $(GOBUILD) -v -tags nvml -ldflags="-s -w" -o ../$(OUTPUT_DIR)/$(BINARY_NAME)-nvml .)
+
+# check-builds builds both binaries, checks that the default one is static, and runs each once.
+check-builds: build build-nvml
+	@if readelf -l $(OUTPUT_DIR)/$(BINARY_NAME) | grep -q 'program interpreter'; then \
+		echo "$(OUTPUT_DIR)/$(BINARY_NAME) must be a static binary"; exit 1; fi
+	@for binary in $(OUTPUT_DIR)/$(BINARY_NAME) $(OUTPUT_DIR)/$(BINARY_NAME)-nvml; do \
+		$$binary --once --json | python3 -c 'import json, sys; json.load(sys.stdin)' || exit 1; \
+		echo "$$binary ran"; done
+
 run:
 	@echo "Running application..."
 	(cd $(MODULE_PATH) && $(GORUN) .)
@@ -38,6 +52,10 @@ clean:
 test:
 	@echo "Running tests..."
 	(cd $(MODULE_PATH) && $(GOTEST) -coverprofile=coverage.out ./...)
+
+test-nvml:
+	@echo "Running tests for the NVML build..."
+	(cd $(MODULE_PATH) && $(GOTEST) -tags nvml ./...)
 
 test-race:
 	@echo "Running tests with the race detector..."
@@ -95,7 +113,7 @@ vuln:
 
 lint:
 	@echo "Linting code..."
-	(cd $(MODULE_PATH) && golangci-lint config verify && $(GOLINT))
+	(cd $(MODULE_PATH) && golangci-lint config verify && $(GOLINT) && $(GOLINT) --build-tags nvml)
 
 ci-check: format-check lint test test-release-notes
 	@echo "CI checks passed."
@@ -106,8 +124,11 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  build    Build the application binary"
+	@echo "  build-nvml Build the NVML application binary (needs glibc)"
+	@echo "  check-builds Build both binaries and run each once"
 	@echo "  run      Run the application"
 	@echo "  test     Run all tests"
+	@echo "  test-nvml Run all tests for the NVML build"
 	@echo "  test-race Run all tests with the race detector"
 	@echo "  test-integrations Run fake integration tests and JSON smoke validation"
 	@echo "  test-release-notes Test the changelog extraction used for releases"
@@ -125,4 +146,4 @@ help:
 	@echo "  help     Show this help message"
 	@echo ""
 
-.PHONY: build run clean test test-race test-integrations test-release-notes e2e-docker e2e-kubernetes e2e-integrations bench bench-save view-coverage deps format format-check vuln lint ci-check help
+.PHONY: build build-nvml check-builds run clean test test-nvml test-race test-integrations test-release-notes e2e-docker e2e-kubernetes e2e-integrations bench bench-save view-coverage deps format format-check vuln lint ci-check help

@@ -3,6 +3,7 @@ module topic
 go 1.26.10
 
 require (
+	github.com/ebitengine/purego v0.11.3
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/rivo/tview v0.42.0
 	github.com/rivo/uniseg v0.4.7
@@ -10,7 +11,6 @@ require (
 )
 
 require (
-	github.com/ebitengine/purego v0.11.2 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect

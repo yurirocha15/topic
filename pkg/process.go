@@ -575,9 +575,21 @@ func updateProcessListWithProvider(
 	tracker *processCPUTracker,
 	now time.Time,
 ) []ProcessInfo {
+	gpuProcesses := func() map[int32]GPUProcessInfo { return getGPUProcessMap(runner) }
+	return updateProcessList(static, gpuProcesses, provider, tracker, now)
+}
+
+// updateProcessList is updateProcessListWithProvider with GPU process usage from gpuProcesses.
+func updateProcessList(
+	static *StaticInfo,
+	gpuProcesses func() map[int32]GPUProcessInfo,
+	provider ProcessProvider,
+	tracker *processCPUTracker,
+	now time.Time,
+) []ProcessInfo {
 	var gpuProcessMap map[int32]GPUProcessInfo
 	if static.GPUCount > 0 {
-		gpuProcessMap = getGPUProcessMap(runner)
+		gpuProcessMap = gpuProcesses()
 	}
 	procs, err := provider.Processes()
 	if err != nil {

@@ -2000,7 +2000,7 @@ func TestGetStaticInfoWithProviders(t *testing.T) {
 		},
 	}
 
-	info, err := getStaticInfoWithProviders(fs, runner, stater, hostProvider, storageProvider)
+	info, err := getStaticInfoWithProviders(fs, nvidiaSMIStaticGPUInfo(runner), stater, hostProvider, storageProvider)
 	if err != nil {
 		t.Fatalf("Unexpected static info error: %v", err)
 	}

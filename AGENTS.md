@@ -11,7 +11,8 @@
 
 - `make test` runs `go test -coverprofile=coverage.out ./...` from `pkg/`.
 - `make lint` runs `golangci-lint run` from `pkg/`.
-- `make build` builds `dist/topic`.
+- `make build` builds the static `dist/topic`; `make build-nvml` builds `dist/topic-nvml`. `make check-builds` builds both, checks that `dist/topic` is static, and runs each once.
+- `make test-nvml` runs the tests with `-tags nvml`. `make lint` lints both builds.
 - `make test-integrations` runs deterministic fake integration tests plus a `--once --json` integration-status smoke check.
 - `make test-release-notes` tests the changelog extraction.
 - `make e2e-docker` validates Docker metadata from inside a real Docker container.
@@ -30,6 +31,8 @@
 - Container CPU usage needs a baseline: the first sample reports 0, a failed counter read keeps the existing baseline, and a counter that goes backwards rebaselines.
 - Compare storage skip paths on path-segment boundaries, not raw prefixes.
 - Accept container IDs from cgroup paths only when they are exactly 64 lowercase hex characters.
+- The default build must stay static (`CGO_ENABLED=0`, no `nvml` tag) so it runs on Alpine and scratch images. Only files tagged `nvml` may import purego; importing it makes the binary depend on glibc. Keep NVML calls behind the `nvmlLibrary` interface so both builds share and test the same logic.
+- The NVML build falls back to `nvidia-smi` whenever NVML cannot load, and `--no-nvml` forces that fallback. Values read through NVML must match `nvidia-smi`: memory used comes from `nvmlDeviceGetMemoryInfo_v2`, which leaves out reserved memory.
 - Treat missing GPU tooling as a normal no-GPU environment. Tests and benchmarks should mock `nvidia-smi`.
 - Keep one `GPUTotalGB` slot per reported GPU, using 0 for unparsable totals, and look totals up by GPU index, not list position.
 - Docker, Kubernetes, and NVML integrations must remain optional. Test unavailable, disabled, partial, and success states with fake hooks; keep live integration tests skipped unless explicitly enabled.

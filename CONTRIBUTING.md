@@ -12,6 +12,20 @@ make lint
 make build
 ```
 
+`topic` has two builds. The default build is static and reads GPU usage with `nvidia-smi`. The NVML build (`-tags nvml`) loads `libnvidia-ml.so.1` with purego, so it reads GPU usage without starting `nvidia-smi` but depends on glibc. Test, lint, and run both:
+
+```bash
+make test-nvml       # tests with -tags nvml
+make check-builds    # builds dist/topic and dist/topic-nvml, checks dist/topic is static, runs each once
+```
+
+`make lint` lints both builds. On a machine with an NVIDIA GPU, compare the NVML build with `nvidia-smi`:
+
+```bash
+cd pkg
+TOPIC_LIVE_INTEGRATION_TESTS=1 go test -tags nvml -run TestLiveNVML ./...
+```
+
 Race detection and benchmarks run directly from the Go module:
 
 ```bash

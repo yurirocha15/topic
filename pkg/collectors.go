@@ -113,12 +113,19 @@ func newDynamicCollectorSet(
 			return updatePressure(fs)
 		},
 		Processes: func() []ProcessInfo {
-			return updateProcessListWithProvider(&staticInfo, runner, processProvider, &state.processCPU, time.Now())
+			gpuProcesses := func() map[int32]GPUProcessInfo { return getGPUProcessMap(runner) }
+			if state.nvml != nil {
+				gpuProcesses = state.nvml.Processes
+			}
+			return updateProcessList(&staticInfo, gpuProcesses, processProvider, &state.processCPU, time.Now())
 		},
 	}
 
 	if staticInfo.GPUCount > 0 {
 		collectors.LiveGPU = func() []GPUUsage {
+			if state.nvml != nil {
+				return state.nvml.Usage()
+			}
 			if state.gpuStream != nil {
 				if usage, ok := state.gpuStream.Usage(staticInfo.GPUCount); ok {
 					return usage
@@ -278,12 +285,23 @@ func dynamicCollectorEntries(collectors DynamicCollectorSet, dynamic *DynamicSna
 }
 
 func getStaticInfo(fs FileReader, runner CommandRunner, stater Stater) (StaticInfo, error) {
-	return getStaticInfoWithProviders(fs, runner, stater, OSHostMetricsProvider{}, OSStorageProvider{})
+	return getStaticInfoWithProviders(
+		fs,
+		nvidiaSMIStaticGPUInfo(runner),
+		stater,
+		OSHostMetricsProvider{},
+		OSStorageProvider{},
+	)
+}
+
+// nvidiaSMIStaticGPUInfo reads the GPU count and memory totals from nvidia-smi.
+func nvidiaSMIStaticGPUInfo(runner CommandRunner) func() (int, []float64, error) {
+	return func() (int, []float64, error) { return getStaticGPUInfo(runner) }
 }
 
 func getStaticInfoWithProviders(
 	fs FileReader,
-	runner CommandRunner,
+	gpuInfo func() (int, []float64, error),
 	stater Stater,
 	hostProvider HostMetricsProvider,
 	storageProvider StorageProvider,
@@ -307,7 +325,7 @@ func getStaticInfoWithProviders(
 	} else {
 		info.HostMemTotalGB = 0
 	}
-	info.GPUCount, info.GPUTotalGB, err = getStaticGPUInfo(runner)
+	info.GPUCount, info.GPUTotalGB, err = gpuInfo()
 	_ = err
 	info.StorageMounts, err = getStaticStorageInfoWithProvider(storageProvider, stater)
 	_ = err

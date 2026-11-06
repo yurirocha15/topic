@@ -129,7 +129,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 	cmdRunner := OSCommandRunner{Context: ctx, Timeout: commandTimeout}
 	stater := OSStater{}
 
-	staticInfo, err := getStaticInfo(fileReader, cmdRunner, stater)
+	// NVML replaces nvidia-smi when this build can load it
+	gpuInfo := nvidiaSMIStaticGPUInfo(cmdRunner)
+	var nvml *nvmlGPUSource
+	if !config.DisableGPU && !config.DisableNVML {
+		if nvml, err = openNVMLGPUSource(); err == nil {
+			defer nvml.Close()
+			gpuInfo = nvml.StaticInfo
+		}
+	}
+	staticInfo, err := getStaticInfoWithProviders(
+		fileReader, gpuInfo, stater, OSHostMetricsProvider{}, OSStorageProvider{},
+	)
 	if err != nil {
 		log.Printf("Could not get all static info: %v. Continuing...", err)
 	}
@@ -138,12 +149,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		staticInfo.GPUTotalGB = nil
 	}
 	staticInfo.Metadata, staticInfo.Integrations = discoverIntegrations(fileReader, config)
+	if nvml != nil {
+		markNVMLInUse(staticInfo.Integrations)
+	}
 
 	state := &State{
 		static:      staticInfo,
 		dynamic:     DynamicInfo{},
 		ui:          UIState{ProcessSort: config.InitialSort, HideASCIIArt: config.HideASCIIArt},
 		prevCPUTime: time.Now(),
+		nvml:        nvml,
 	}
 	refresh := func() {
 		refreshDynamicState(state, fileReader, cmdRunner)
@@ -158,8 +173,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 
-	// The dashboard keeps one nvidia-smi running for GPU usage instead of starting one each refresh
-	if staticInfo.GPUCount > 0 {
+	// Without NVML, the dashboard keeps one nvidia-smi running for GPU usage instead of starting
+	// one each refresh
+	if staticInfo.GPUCount > 0 && nvml == nil {
 		state.gpuStream = newGPUUsageStream(cmdRunner, config.RefreshInterval)
 		defer state.gpuStream.Stop()
 	}
