@@ -3,7 +3,35 @@ package main
 import (
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
+
+// pmonMinInterval is how often nvidia-smi pmon may run. Starting it costs about 3% of a core each
+// time, so per-process GPU usage is refreshed less often than the rest of the dashboard.
+const pmonMinInterval = 3 * time.Second
+
+// gpuProcessCache reuses the last per-process GPU query until it is pmonMinInterval old. The zero
+// value is ready to use.
+type gpuProcessCache struct {
+	mu        sync.Mutex
+	queried   bool
+	at        time.Time
+	processes map[int32]GPUProcessInfo
+}
+
+// get returns the cached processes, running query first when there are none or they are too old.
+// A failed query is cached too, so a broken nvidia-smi is not retried on every refresh.
+func (c *gpuProcessCache) get(now time.Time, query func() map[int32]GPUProcessInfo) map[int32]GPUProcessInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.queried || now.Sub(c.at) >= pmonMinInterval || now.Before(c.at) {
+		c.processes = query()
+		c.at = now
+		c.queried = true
+	}
+	return c.processes
+}
 
 // getStaticGPUInfo fetches total memory for each GPU.
 func getStaticGPUInfo(runner CommandRunner) (int, []float64, error) {

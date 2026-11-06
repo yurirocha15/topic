@@ -301,6 +301,8 @@ type State struct {
 	gpuStream  *gpuUsageStream
 	// nvml, when set, supplies GPU usage instead of nvidia-smi.
 	nvml *nvmlGPUSource
+	// pmonCache keeps the last nvidia-smi pmon result, so pmon runs at most every few seconds.
+	pmonCache gpuProcessCache
 	// networkShown is the interface the network row showed last, kept so the row stays steady.
 	networkShown string
 

@@ -113,7 +113,8 @@ func newDynamicCollectorSet(
 			return updatePressure(fs)
 		},
 		Processes: func() []ProcessInfo {
-			gpuProcesses := func() map[int32]GPUProcessInfo { return getGPUProcessMap(runner) }
+			pmon := func() map[int32]GPUProcessInfo { return getGPUProcessMap(runner) }
+			gpuProcesses := func() map[int32]GPUProcessInfo { return state.pmonCache.get(time.Now(), pmon) }
 			if state.nvml != nil {
 				gpuProcesses = state.nvml.Processes
 			}
