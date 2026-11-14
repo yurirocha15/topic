@@ -9,6 +9,7 @@
 [![CI](https://github.com/yurirocha15/topic/actions/workflows/ci.yml/badge.svg)](https://github.com/yurirocha15/topic/actions/workflows/ci.yml)
 [![Latest Release](https://img.shields.io/github/v/release/yurirocha15/topic)](https://github.com/yurirocha15/topic/releases/latest)
 [![Go Reference](https://pkg.go.dev/badge/github.com/yurirocha15/topic/cmd/topic.svg)](https://pkg.go.dev/github.com/yurirocha15/topic/cmd/topic)
+[![codecov](https://codecov.io/gh/yurirocha15/topic/graph/badge.svg)](https://codecov.io/gh/yurirocha15/topic)
 
 ![htop and topic running in the same container, which is limited to 2 CPUs and 2 GiB of memory: htop measures against the host and shows 5.9% memory, topic shows the container at 90% of its memory limit and 100% of its CPU limit](./static/img/demo.gif)
 
