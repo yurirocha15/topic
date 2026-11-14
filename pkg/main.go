@@ -149,9 +149,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		staticInfo.GPUTotalGB = nil
 	}
 	staticInfo.Metadata, staticInfo.Integrations = discoverIntegrations(fileReader, config)
-	if nvml != nil {
-		markNVMLInUse(staticInfo.Integrations)
-	}
+	finishNVMLStatus(staticInfo.Integrations, nvml != nil, staticInfo.GPUCount)
 
 	state := &State{
 		static:      staticInfo,

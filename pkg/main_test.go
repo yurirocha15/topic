@@ -2623,6 +2623,11 @@ func TestDiscoverNVMLStatusWithHooks(t *testing.T) {
 		t.Fatalf("Expected disabled NVML status, got %+v", disabled)
 	}
 
+	noGPU := discoverNVMLStatusWithProbe(AppConfig{DisableGPU: true}, integrationProbe{})
+	if noGPU.Available || noGPU.Detail != integrationDisabled {
+		t.Fatalf("Expected NVML disabled by --no-gpu, got %+v", noGPU)
+	}
+
 	driverProbe := integrationProbe{
 		stat: func(path string) (os.FileInfo, error) {
 			if path == nvmlDriverVersionPath {

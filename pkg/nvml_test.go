@@ -203,16 +203,58 @@ func TestCollectorsUseNVMLInsteadOfNvidiaSMI(t *testing.T) {
 	}
 }
 
-func TestMarkNVMLInUse(t *testing.T) {
-	statuses := []IntegrationStatus{
-		{Name: integrationDocker, Detail: integrationUnavailable},
-		{Name: integrationNVML, Detail: "nvidia driver visible; nvidia-smi fallback enabled"},
+func TestFinishNVMLStatus(t *testing.T) {
+	driverVisible := "nvidia driver visible; nvidia-smi fallback enabled"
+	tests := []struct {
+		name      string
+		status    IntegrationStatus
+		nvmlInUse bool
+		gpuCount  int
+		want      IntegrationStatus
+	}{
+		{
+			name:      "NVML in use",
+			status:    IntegrationStatus{Name: integrationNVML, Available: true, Detail: driverVisible},
+			nvmlInUse: true,
+			gpuCount:  1,
+			want:      IntegrationStatus{Name: integrationNVML, Available: true, Detail: nvmlInUseDetail},
+		},
+		{
+			name:     "nvidia-smi found a GPU",
+			status:   IntegrationStatus{Name: integrationNVML, Available: true, Detail: driverVisible},
+			gpuCount: 1,
+			want:     IntegrationStatus{Name: integrationNVML, Available: true, Detail: driverVisible},
+		},
+		{
+			// A container without a GPU still sees the host's /proc/driver/nvidia/version
+			name:   "driver visible but no GPU",
+			status: IntegrationStatus{Name: integrationNVML, Available: true, Detail: driverVisible},
+			want:   IntegrationStatus{Name: integrationNVML, Detail: nvmlNoGPUDetail},
+		},
+		{
+			name:   "disabled stays disabled",
+			status: IntegrationStatus{Name: integrationNVML, Detail: integrationDisabled},
+			want:   IntegrationStatus{Name: integrationNVML, Detail: integrationDisabled},
+		},
+		{
+			name:   "unavailable stays unavailable",
+			status: IntegrationStatus{Name: integrationNVML, Detail: integrationUnavailable},
+			want:   IntegrationStatus{Name: integrationNVML, Detail: integrationUnavailable},
+		},
 	}
-	markNVMLInUse(statuses)
-	if statuses[0].Available || statuses[0].Detail != integrationUnavailable {
-		t.Fatalf("expected other integrations unchanged, got %+v", statuses[0])
-	}
-	if !statuses[1].Available || statuses[1].Detail != nvmlInUseDetail {
-		t.Fatalf("expected NVML in use, got %+v", statuses[1])
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			statuses := []IntegrationStatus{
+				{Name: integrationDocker, Detail: integrationUnavailable},
+				test.status,
+			}
+			finishNVMLStatus(statuses, test.nvmlInUse, test.gpuCount)
+			if statuses[0].Available || statuses[0].Detail != integrationUnavailable {
+				t.Fatalf("expected other integrations unchanged, got %+v", statuses[0])
+			}
+			if statuses[1] != test.want {
+				t.Fatalf("got %+v, want %+v", statuses[1], test.want)
+			}
+		})
 	}
 }

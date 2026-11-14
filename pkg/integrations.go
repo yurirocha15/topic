@@ -28,6 +28,7 @@ const (
 	integrationKubernetes    = "kubernetes"
 	integrationNVML          = "nvml"
 	nvmlInUseDetail          = "GPU usage read through NVML"
+	nvmlNoGPUDetail          = "no NVIDIA GPU found"
 	integrationDisabled      = "disabled"
 	integrationUnavailable   = "unavailable"
 	integrationAvailable     = "available"
@@ -324,7 +325,7 @@ func parseKubernetesPod(reader io.Reader) (ContainerMetadata, error) {
 
 func discoverNVMLStatusWithProbe(config AppConfig, probe integrationProbe) IntegrationStatus {
 	probe = probe.withDefaults()
-	if config.DisableNVML {
+	if config.DisableNVML || config.DisableGPU {
 		return IntegrationStatus{Name: integrationNVML, Detail: integrationDisabled}
 	}
 	if _, err := probe.stat(nvmlDriverVersionPath); err == nil {
@@ -344,12 +345,21 @@ func discoverNVMLStatusWithProbe(config AppConfig, probe integrationProbe) Integ
 	return IntegrationStatus{Name: integrationNVML, Detail: integrationUnavailable}
 }
 
-// markNVMLInUse reports that GPU usage comes from NVML instead of nvidia-smi.
-func markNVMLInUse(statuses []IntegrationStatus) {
+// finishNVMLStatus updates the NVML status once the GPUs have been counted. A visible driver is
+// not enough: a container without a GPU still sees the host's /proc/driver/nvidia/version.
+func finishNVMLStatus(statuses []IntegrationStatus, nvmlInUse bool, gpuCount int) {
 	for index := range statuses {
-		if statuses[index].Name == integrationNVML {
-			statuses[index].Available = true
-			statuses[index].Detail = nvmlInUseDetail
+		status := &statuses[index]
+		if status.Name != integrationNVML {
+			continue
+		}
+		switch {
+		case nvmlInUse:
+			status.Available = true
+			status.Detail = nvmlInUseDetail
+		case status.Available && gpuCount == 0:
+			status.Available = false
+			status.Detail = nvmlNoGPUDetail
 		}
 	}
 }
