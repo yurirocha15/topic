@@ -77,6 +77,31 @@ The script checks the download against the release's `SHA256SUMS` file. To confi
 gh attestation verify topic-linux-amd64 --repo yurirocha15/topic
 ```
 
+#### In a Container or Pod That Is Already Running
+
+You don't need to rebuild the image or install anything in the container. Download the static binary on your machine (`topic-linux-arm64` for ARM) and copy it in:
+
+```bash
+curl -fsSLo topic https://github.com/yurirocha15/topic/releases/latest/download/topic-linux-amd64
+chmod +x topic
+```
+
+Docker:
+
+```bash
+docker cp topic <container>:/tmp/topic
+docker exec -it <container> /tmp/topic
+```
+
+Kubernetes:
+
+```bash
+kubectl cp topic <pod>:/tmp/topic -c <container>
+kubectl exec -it <pod> -c <container> -- /tmp/topic
+```
+
+Add `-n <namespace>` to both commands for a pod in another namespace. `kubectl cp` needs `tar` in the container. If `/tmp` is read-only or mounted `noexec`, copy the binary to another writable directory. The copy goes away when the container is replaced.
+
 ---
 
 ### Usage
