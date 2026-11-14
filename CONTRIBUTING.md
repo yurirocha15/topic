@@ -22,14 +22,14 @@ make check-builds    # builds dist/topic and dist/topic-nvml, checks dist/topic 
 `make lint` lints both builds. On a machine with an NVIDIA GPU, compare the NVML build with `nvidia-smi`:
 
 ```bash
-cd pkg
+cd cmd/topic
 TOPIC_LIVE_INTEGRATION_TESTS=1 go test -tags nvml -run TestLiveNVML ./...
 ```
 
 Race detection and benchmarks run directly from the Go module:
 
 ```bash
-cd pkg
+cd cmd/topic
 go test -race ./...
 go test -bench=. -benchmem -count=5 ./...
 ```

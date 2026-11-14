@@ -12,9 +12,9 @@ GOVULNCHECK=golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
 # Project variables
 BINARY_NAME=topic
-# The Go module lives under pkg/ to keep build artifacts, static assets,
-# and documentation at the repository root separate from source code.
-MODULE_PATH=./pkg/
+# The module is rooted at the repository; the command lives in cmd/topic. Go commands run from
+# there so that ./... covers only the command.
+MODULE_PATH=./cmd/topic/
 OUTPUT_DIR=./dist
 
 # Default target executed when running `make`.
@@ -24,13 +24,13 @@ OUTPUT_DIR=./dist
 build:
 	@echo "Building application..."
 	@mkdir -p $(OUTPUT_DIR)
-	(cd $(MODULE_PATH) && CGO_ENABLED=0 $(GOBUILD) -v -ldflags="-s -w" -o ../$(OUTPUT_DIR)/$(BINARY_NAME) .)
+	(cd $(MODULE_PATH) && CGO_ENABLED=0 $(GOBUILD) -v -ldflags="-s -w" -o $(CURDIR)/$(OUTPUT_DIR)/$(BINARY_NAME) .)
 
 # build-nvml builds dist/topic-nvml, which reads GPU usage through NVML and needs glibc.
 build-nvml:
 	@echo "Building the NVML application..."
 	@mkdir -p $(OUTPUT_DIR)
-	(cd $(MODULE_PATH) && CGO_ENABLED=0 $(GOBUILD) -v -tags nvml -ldflags="-s -w" -o ../$(OUTPUT_DIR)/$(BINARY_NAME)-nvml .)
+	(cd $(MODULE_PATH) && CGO_ENABLED=0 $(GOBUILD) -v -tags nvml -ldflags="-s -w" -o $(CURDIR)/$(OUTPUT_DIR)/$(BINARY_NAME)-nvml .)
 
 # check-builds builds both binaries, checks that the default one is static, and runs each once.
 check-builds: build build-nvml

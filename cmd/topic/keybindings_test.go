@@ -53,7 +53,7 @@ func TestKeyHintsFitTheCompactSidePanel(t *testing.T) {
 }
 
 func TestReadmeControlsMatchKeyBindings(t *testing.T) {
-	readme, err := os.ReadFile("../README.md")
+	readme, err := os.ReadFile("../../README.md")
 	if err != nil {
 		t.Fatal(err)
 	}

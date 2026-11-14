@@ -3,25 +3,25 @@
 ## Project Shape
 
 - `topic` is a Go terminal UI that reports container-aware CPU, memory, GPU, storage, and process usage.
-- The Go module lives in `pkg/`; run direct Go commands from that directory.
+- The Go module `github.com/yurirocha15/topic` is rooted at the repository; the command lives in `cmd/topic/`. Run direct Go commands from `cmd/topic/` so `./...` covers only the command.
 - Static assets for README/release material live under `static/`.
-- Build output belongs in `dist/`. Do not commit generated binaries such as `pkg/topic`.
+- Build output belongs in `dist/`. Do not commit generated binaries such as `cmd/topic/topic`.
 
 ## Common Commands
 
-- `make test` runs `go test -coverprofile=coverage.out ./...` from `pkg/`.
-- `make lint` runs `golangci-lint run` from `pkg/`.
+- `make test` runs `go test -coverprofile=coverage.out ./...` from `cmd/topic/`.
+- `make lint` runs `golangci-lint run` from `cmd/topic/`.
 - `make build` builds the static `dist/topic`; `make build-nvml` builds `dist/topic-nvml`. `make check-builds` builds both, checks that `dist/topic` is static, and runs each once.
 - `make test-nvml` runs the tests with `-tags nvml`. `make lint` lints both builds.
 - `make test-integrations` runs deterministic fake integration tests plus a `--once --json` integration-status smoke check.
 - `make test-release-notes` tests the changelog extraction.
 - `make e2e-docker` validates Docker metadata from inside a real Docker container.
 - `make e2e-kubernetes` validates Kubernetes metadata from inside a real cluster pod.
-- Direct test loop: `cd pkg && go test ./...`.
-- Race check: `make test-race` or `cd pkg && go test -race ./...`.
+- Direct test loop: `cd cmd/topic && go test ./...`.
+- Race check: `make test-race` or `cd cmd/topic && go test -race ./...`.
 - `make format-check` fails on unformatted code without rewriting files. `make vuln` runs `govulncheck`.
-- TUI regression check: `cd pkg && go test -run 'Test(ResourceGridResponsiveAlignment|DashboardLayoutAtCommonTerminalSizes|CompactInfoPanelLeavesProcessTableSpace|TUIInputCaptureDoesNotDeadlock)' -count=1 ./...`.
-- Baseline benchmarks: `cd pkg && go test -bench=. -benchmem -count=5 ./...`.
+- TUI regression check: `cd cmd/topic && go test -run 'Test(ResourceGridResponsiveAlignment|DashboardLayoutAtCommonTerminalSizes|CompactInfoPanelLeavesProcessTableSpace|TUIInputCaptureDoesNotDeadlock)' -count=1 ./...`.
+- Baseline benchmarks: `cd cmd/topic && go test -bench=. -benchmem -count=5 ./...`.
 - Live integration discovery is opt-in: `TOPIC_LIVE_INTEGRATION_TESTS=1 make test-integrations`.
 
 ## Implementation Notes
@@ -38,7 +38,7 @@
 - Docker, Kubernetes, and NVML integrations must remain optional. Test unavailable, disabled, partial, and success states with fake hooks; keep live integration tests skipped unless explicitly enabled.
 - Use the E2E targets for native-environment validation; `make test-integrations` only proves deterministic behavior and JSON status shape.
 - Avoid long work while holding the dynamic state mutex; collect values first, then publish a snapshot.
-- The process list is read straight from `/proc` (`pkg/procfs.go`). Each refresh reads only `stat` and `cmdline` per process; read `status` once per process and count open files only on demand. Don't route per-process reads back through gopsutil, which costs about ten times more.
+- The process list is read straight from `/proc` (`cmd/topic/procfs.go`). Each refresh reads only `stat` and `cmdline` per process; read `status` once per process and count open files only on demand. Don't route per-process reads back through gopsutil, which costs about ten times more.
 - Process table rows carry their PID as a cell reference. Resolve selection from that PID, not the row index, because the snapshot can change between drawing and a keypress.
 - Keep resource rows on the shared label/percentage/bar/detail grid. At wide widths the two columns must retain a visible divider; narrow layouts must not overflow.
 - Use the shared semantic palette for usage values: green below 70%, gold from 70% to 89.9%, and red at 90% or above.

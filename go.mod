@@ -1,4 +1,4 @@
-module topic
+module github.com/yurirocha15/topic
 
 go 1.26.11
 

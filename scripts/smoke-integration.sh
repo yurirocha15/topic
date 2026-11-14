@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -n "${TOPIC_BINARY:-}" ]]; then
   snapshot="$("$TOPIC_BINARY" --once --json)"
 else
-  snapshot="$(cd "$ROOT_DIR/pkg" && go run . --once --json)"
+  snapshot="$(cd "$ROOT_DIR/cmd/topic" && go run . --once --json)"
 fi
 
 if command -v jq >/dev/null 2>&1; then

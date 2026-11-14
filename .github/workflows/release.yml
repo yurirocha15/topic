@@ -37,8 +37,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: 'pkg/go.mod'
-          cache-dependency-path: 'pkg/go.sum'
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
 
       - name: Resolve version
         id: version
@@ -64,7 +64,7 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Run tests
-        working-directory: ./pkg
+        working-directory: ./cmd/topic
         run: |
           go test ./...
           go test -tags nvml ./...
@@ -92,11 +92,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: 'pkg/go.mod'
-          cache-dependency-path: 'pkg/go.sum'
+          go-version-file: 'go.mod'
+          cache-dependency-path: 'go.sum'
 
       - name: Build binaries
-        working-directory: ./pkg
+        working-directory: ./cmd/topic
         env:
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
@@ -107,8 +107,8 @@ jobs:
         run: |
           # -ldflags="-s -w" strips the binary to make it smaller.
           # -X main.Version=... injects the Git tag as a version string.
-          go build -v -ldflags="-s -w -X main.Version=${TAG}" -o "../topic-${GOOS}-${GOARCH}" .
-          go build -v -tags nvml -ldflags="-s -w -X main.Version=${TAG}" -o "../topic-${GOOS}-${GOARCH}-nvml" .
+          go build -v -ldflags="-s -w -X main.Version=${TAG}" -o "${GITHUB_WORKSPACE}/topic-${GOOS}-${GOARCH}" .
+          go build -v -tags nvml -ldflags="-s -w -X main.Version=${TAG}" -o "${GITHUB_WORKSPACE}/topic-${GOOS}-${GOARCH}-nvml" .
 
       - name: Run the built binaries
         env:

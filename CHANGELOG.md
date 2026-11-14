@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `go install github.com/yurirocha15/topic/cmd/topic@latest` installs `topic` with Go 1.26 or later.
+
 ## [0.0.5] - 2026-11-14
 
 ### Added
