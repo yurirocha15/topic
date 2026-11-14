@@ -160,7 +160,7 @@ func newDynamicCollectorSet(
 }
 
 func usesContainerCPU(staticInfo StaticInfo) bool {
-	return staticInfo.ContainerCPULimit > 0 && staticInfo.ContainerCPULimit != float64(staticInfo.HostCores)
+	return staticInfo.ContainerCPULimited && staticInfo.ContainerCPULimit > 0
 }
 
 func usesContainerMemory(staticInfo StaticInfo) bool {
@@ -314,11 +314,12 @@ func getStaticInfoWithProviders(
 	} else {
 		info.CgroupVersion = CgroupV2
 	}
-	info.HostCores, err = hostProvider.CPUCounts(false)
-	if err != nil {
+	// Logical CPUs, because CPU quotas and process CPU time are measured in them
+	info.HostCores, err = hostProvider.CPUCounts(true)
+	if err != nil || info.HostCores < 1 {
 		info.HostCores = 1
 	}
-	info.ContainerCPULimit = getContainerCPULimit(info.CgroupVersion, info.HostCores, fs)
+	info.ContainerCPULimit, info.ContainerCPULimited = getContainerCPULimit(info.CgroupVersion, info.HostCores, fs)
 	info.ContainerMemLimitBytes, info.ContainerMemLimitGB = getContainerMemLimit(info.CgroupVersion, fs)
 	hostMem, hostMemErr := hostProvider.VirtualMemory()
 	if hostMemErr == nil {

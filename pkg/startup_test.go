@@ -136,7 +136,9 @@ func TestSampleOnceRefreshesAcrossTheWindow(t *testing.T) {
 
 func TestSampleOnceReportsDeltaMetrics(t *testing.T) {
 	const cpuStatPath = "/sys/fs/cgroup/cpu.stat"
-	state := &State{static: StaticInfo{CgroupVersion: CgroupV2, ContainerCPULimit: 2, HostCores: 8}}
+	state := &State{
+		static: StaticInfo{CgroupVersion: CgroupV2, ContainerCPULimit: 2, ContainerCPULimited: true, HostCores: 8},
+	}
 	files := map[string]string{cpuStatPath: "usage_usec 5000000"}
 	network := &MockNetworkProvider{counters: []netio.IOCountersStat{{Name: "eth0", BytesRecv: 1000, BytesSent: 1000}}}
 

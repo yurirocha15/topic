@@ -345,6 +345,7 @@ func TestCalculateLabelInfo(t *testing.T) {
 	state := &State{
 		static: StaticInfo{
 			ContainerCPULimit:      2,
+			ContainerCPULimited:    true,
 			ContainerMemLimitBytes: 4 * bytesPerGB,
 			ContainerMemLimitGB:    4,
 			HostCores:              8,
@@ -369,6 +370,7 @@ func TestCalculateLabelInfo(t *testing.T) {
 	}
 
 	state.static.ContainerCPULimit = float64(state.static.HostCores)
+	state.static.ContainerCPULimited = false
 	state.static.ContainerMemLimitBytes = 0
 	state.static.ContainerMemLimitGB = 0
 	cpuLabel, cpuInfo, cpuUsage = calculateCPULabelInfo(state)
@@ -1509,7 +1511,10 @@ func TestGetContainerCPULimit(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockFS := MockFileReader{files: tc.mockFiles}
-			actualLimit := getContainerCPULimit(tc.cgroupVersion, tc.hostCores, mockFS)
+			actualLimit, limited := getContainerCPULimit(tc.cgroupVersion, tc.hostCores, mockFS)
+			if limited != (actualLimit != float64(tc.hostCores)) {
+				t.Errorf("Expected limited=%t for limit %.2f", !limited, actualLimit)
+			}
 			if actualLimit != tc.expectedCPULimit {
 				t.Errorf("Expected CPU limit %.2f, but got %.2f", tc.expectedCPULimit, actualLimit)
 			}
@@ -2081,6 +2086,7 @@ func TestUpdateAll(t *testing.T) {
 		static: StaticInfo{
 			CgroupVersion:          CgroupV2,
 			ContainerCPULimit:      2.0,
+			ContainerCPULimited:    true,
 			ContainerMemLimitBytes: 2 * bytesPerGB,
 			GPUCount:               1,
 		},
@@ -2114,6 +2120,7 @@ func TestNewDynamicCollectorSetSelectsRequiredCollectors(t *testing.T) {
 		static: StaticInfo{
 			HostCores:              8,
 			ContainerCPULimit:      2,
+			ContainerCPULimited:    true,
 			ContainerMemLimitBytes: bytesPerGB,
 			GPUCount:               1,
 		},
@@ -2138,6 +2145,7 @@ func TestNewDynamicCollectorSetSelectsRequiredCollectors(t *testing.T) {
 	}
 
 	state.static.ContainerCPULimit = float64(state.static.HostCores)
+	state.static.ContainerCPULimited = false
 	state.static.ContainerMemLimitBytes = 0
 	state.static.GPUCount = 0
 	collectors = newDynamicCollectorSet(

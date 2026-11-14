@@ -24,6 +24,7 @@ type ExportSnapshot struct {
 type StaticSnapshot struct {
 	CgroupVersion          CgroupVersion       `json:"cgroupVersion"`
 	ContainerCPULimit      float64             `json:"containerCpuLimit"`
+	ContainerCPULimited    bool                `json:"containerCpuLimited"`
 	ContainerMemLimitBytes int64               `json:"containerMemLimitBytes"`
 	ContainerMemLimitGB    float64             `json:"containerMemLimitGb"`
 	HostCores              int                 `json:"hostCores"`
@@ -74,6 +75,7 @@ func snapshotFromState(state *State) ExportSnapshot {
 		Static: StaticSnapshot{
 			CgroupVersion:          staticInfo.CgroupVersion,
 			ContainerCPULimit:      staticInfo.ContainerCPULimit,
+			ContainerCPULimited:    staticInfo.ContainerCPULimited,
 			ContainerMemLimitBytes: staticInfo.ContainerMemLimitBytes,
 			ContainerMemLimitGB:    staticInfo.ContainerMemLimitGB,
 			HostCores:              staticInfo.HostCores,

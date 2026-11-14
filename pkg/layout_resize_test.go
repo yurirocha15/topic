@@ -60,6 +60,6 @@ func TestRunTUILaysOutForTheRealWidthOnStartAndResize(t *testing.T) {
 	}
 	waitForTUICondition(t, app, func() bool {
 		line := screenLineWith(screen, "CPU")
-		return strings.Contains(line, "12 cores") && strings.Contains(line, "│") && strings.Contains(line, "MEMORY")
+		return strings.Contains(line, "12 CPUs") && strings.Contains(line, "│") && strings.Contains(line, "MEMORY")
 	}, "the wider terminal to show CPU and memory side by side with details")
 }

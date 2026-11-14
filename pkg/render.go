@@ -120,11 +120,11 @@ func calculateResourceLayout(availableWidth int, bars []BarData) BarLayout {
 func calculateCPULabelInfo(state *State) (string, string, float64) {
 	var usage float64
 	var label, info string
-	if state.static.ContainerCPULimit == float64(state.static.HostCores) {
+	if !state.static.ContainerCPULimited {
 		// Running outside container or no cgroup limit - use host metrics
 		usage = state.dynamic.HostCPUUsage
 		label = metricCPULabel
-		info = fmt.Sprintf("%d cores, no limit", state.static.HostCores)
+		info = fmt.Sprintf("%d CPUs, no limit", state.static.HostCores)
 	} else {
 		// Running inside container with limits
 		usage = state.dynamic.ContainerCPUUsage

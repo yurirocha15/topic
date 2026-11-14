@@ -28,13 +28,14 @@ func readStringFromFile(path string, fs FileReader) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-// getContainerCPULimit reads the CPU limit from cgroup files and returns it as a percentage of host cores.
-func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int, fs FileReader) float64 {
+// getContainerCPULimit returns the CPU quota in CPUs and true, or hostCores and false when no
+// quota is set or readable.
+func getContainerCPULimit(cgroupVersion CgroupVersion, hostCores int, fs FileReader) (float64, bool) {
 	quota, period, ok := readCPUQuota(cgroupVersion, fs)
 	if ok && quota > 0 && period > 0 {
-		return float64(quota) / float64(period)
+		return float64(quota) / float64(period), true
 	}
-	return float64(hostCores)
+	return float64(hostCores), false
 }
 
 // readCPUQuota returns the CPU quota and period, and false if no limit is set or readable.

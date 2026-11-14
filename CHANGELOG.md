@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `--once --json` reports `containerCpuLimited`, which says whether a CPU limit is set.
+
 ### Fixed
 
 - `%GPUMEM` now shows how much of its GPU's memory each process uses. It previously showed how busy the GPU memory bus was, so a process holding gigabytes of GPU memory could show 0%. The process details also show the amount in MiB.
@@ -28,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The network row stays on one interface instead of jumping to whichever was busiest that second. It switches only when another interface carries more than twice the traffic, shows the default-route interface when the network is idle, and its history now follows the interface it names.
 - Resource details, such as `2.00 CPU limit` and `1.77 / 2.00 GiB`, are drawn in the normal text color instead of dim gray, which was hard to read on many terminal themes.
 - When a filter matches nothing, the process table says so and how to clear the filter, instead of showing an empty table.
+- On CPUs with two threads per core, `topic` counted cores instead of threads. Without a CPU limit, the CPU row now shows every CPU the host has, such as `24 CPUs, no limit` on a 12-core, 24-thread CPU, and each process's `%CPU` is no longer doubled.
+- A CPU limit that happens to equal the host's core count, such as `--cpus 12` on a 12-core host, is now shown as a limit. It was treated as no limit, so the CPU row showed host-wide usage instead of the container's.
 - In a container without a GPU, the integrations line no longer shows `nvml=+` just because the host's NVIDIA driver is visible. NVML now shows as available only when a GPU is found, and `--no-gpu` shows it as disabled.
 - Help, the side panel, and the README now list the same keys. Help groups them by where they work and adds the ones it left out: `r` to reverse the sort, Page Up/Down and Home/End in the process table, `Enter` to leave filter and sort mode, and the dialog keys. The side panel now shows `r reverse` and `k signal`.
 

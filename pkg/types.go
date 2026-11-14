@@ -18,6 +18,7 @@ const (
 type StaticInfo struct {
 	CgroupVersion          CgroupVersion
 	ContainerCPULimit      float64
+	ContainerCPULimited    bool // false without a CPU quota; ContainerCPULimit then holds HostCores
 	ContainerMemLimitBytes int64
 	ContainerMemLimitGB    float64
 	HostCores              int
