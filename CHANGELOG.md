@@ -6,9 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-14
+
 ### Added
 
 - `--once --json` reports `containerCpuLimited`, which says whether a CPU limit is set.
+
+### Changed
+
+- `topic` uses much less CPU and memory. It reads the process list straight from `/proc`, which takes about a tenth of the time and allocates far less memory. With about 730 processes, its own CPU use dropped from about 9% to about 2.5% of one core.
+- Processes whose user has no account name show the numeric user ID, as `ps` does, instead of `n/a`.
+- While paused, `topic` no longer redraws the screen on every refresh, so it uses almost no CPU.
+- Releases now include an NVML build, `topic-linux-<arch>-nvml`, for machines with an NVIDIA GPU. It reads GPU usage directly from the NVIDIA driver library instead of starting `nvidia-smi`, which cuts `topic`'s total CPU use by more than half on a GPU machine (from about 7.9% to about 3.6% of one core in our measurement). It needs glibc, so the install script picks it only when the NVIDIA driver and glibc are present. The static `topic-linux-<arch>` binary still runs anywhere, including Alpine. In the NVML build, `--no-nvml` switches back to `nvidia-smi`.
+- In the static build, per-process `%GPU` and `%GPUMEM` now update at most every 3 seconds instead of every refresh, because each `nvidia-smi pmon` run costs about 3% of a core. This brings `topic`'s total CPU use on a GPU machine from about 6% to about 3.3% of one core. The NVML build still updates them every refresh.
+- On machines with an NVIDIA GPU, the dashboard keeps one `nvidia-smi` running for GPU usage instead of starting a new one every refresh, which saves about 2% of a core.
 
 ### Fixed
 
@@ -36,15 +47,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A CPU limit that happens to equal the host's core count, such as `--cpus 12` on a 12-core host, is now shown as a limit. It was treated as no limit, so the CPU row showed host-wide usage instead of the container's.
 - In a container without a GPU, the integrations line no longer shows `nvml=+` just because the host's NVIDIA driver is visible. NVML now shows as available only when a GPU is found, and `--no-gpu` shows it as disabled.
 - Help, the side panel, and the README now list the same keys. Help groups them by where they work and adds the ones it left out: `r` to reverse the sort, Page Up/Down and Home/End in the process table, `Enter` to leave filter and sort mode, and the dialog keys. The side panel now shows `r reverse` and `k signal`.
-
-### Changed
-
-- `topic` uses much less CPU and memory. It reads the process list straight from `/proc`, which takes about a tenth of the time and allocates far less memory. With about 730 processes, its own CPU use dropped from about 9% to about 2.5% of one core.
-- Processes whose user has no account name show the numeric user ID, as `ps` does, instead of `n/a`.
-- While paused, `topic` no longer redraws the screen on every refresh, so it uses almost no CPU.
-- Releases now include an NVML build, `topic-linux-<arch>-nvml`, for machines with an NVIDIA GPU. It reads GPU usage directly from the NVIDIA driver library instead of starting `nvidia-smi`, which cuts `topic`'s total CPU use by more than half on a GPU machine (from about 7.9% to about 3.6% of one core in our measurement). It needs glibc, so the install script picks it only when the NVIDIA driver and glibc are present. The static `topic-linux-<arch>` binary still runs anywhere, including Alpine. In the NVML build, `--no-nvml` switches back to `nvidia-smi`.
-- In the static build, per-process `%GPU` and `%GPUMEM` now update at most every 3 seconds instead of every refresh, because each `nvidia-smi pmon` run costs about 3% of a core. This brings `topic`'s total CPU use on a GPU machine from about 6% to about 3.3% of one core. The NVML build still updates them every refresh.
-- On machines with an NVIDIA GPU, the dashboard keeps one `nvidia-smi` running for GPU usage instead of starting a new one every refresh, which saves about 2% of a core.
 
 ## [0.0.4] - 2026-10-31
 
@@ -129,7 +131,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Install script for Linux, including Alpine.
 - Static Linux binaries for amd64 and arm64.
 
-[Unreleased]: https://github.com/yurirocha15/topic/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/yurirocha15/topic/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/yurirocha15/topic/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/yurirocha15/topic/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/yurirocha15/topic/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/yurirocha15/topic/compare/v0.0.1...v0.0.2
