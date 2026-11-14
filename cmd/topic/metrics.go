@@ -325,6 +325,7 @@ func updateMetricsHistory(history *MetricsHistory, staticInfo StaticInfo, dynami
 	history.DiskIO.Add(totalDiskIORate(dynamic.DiskIOUsage) / bytesPerSecondToMiBSecond)
 }
 
+// Add records a sample, overwriting the oldest one once the ring is full.
 func (ring *HistoryRing) Add(value float64) {
 	if len(ring.Values) == 0 {
 		ring.Values = make([]float64, historySize)
@@ -336,6 +337,7 @@ func (ring *HistoryRing) Add(value float64) {
 	}
 }
 
+// Ordered returns the recorded samples from oldest to newest.
 func (ring *HistoryRing) Ordered() []float64 {
 	if len(ring.Values) == 0 {
 		return nil

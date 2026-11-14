@@ -29,6 +29,7 @@ type FileReader interface {
 // OSFileReader is the default implementation of FileReader using the os package.
 type OSFileReader struct{}
 
+// ReadFile reads the whole file with os.ReadFile.
 func (fs OSFileReader) ReadFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
@@ -44,6 +45,8 @@ type OSCommandRunner struct {
 	Timeout time.Duration
 }
 
+// Output runs the command and returns its standard output. The command is killed when the
+// timeout (commandTimeout by default) passes or the context is canceled.
 func (ocr OSCommandRunner) Output(name string, arg ...string) ([]byte, error) {
 	timeout := ocr.Timeout
 	if timeout <= 0 {
@@ -104,6 +107,7 @@ type Stater interface {
 // OSStater is the default implementation of Stater using the os package.
 type OSStater struct{}
 
+// Stat returns the file's metadata with os.Stat.
 func (s OSStater) Stat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }
@@ -148,10 +152,12 @@ type StorageProvider interface {
 	Usage(path string) (*disk.UsageStat, error)
 }
 
+// NetworkProvider exposes network interface byte counters.
 type NetworkProvider interface {
 	IOCounters(pernic bool) ([]netio.IOCountersStat, error)
 }
 
+// DiskIOProvider exposes block device I/O counters.
 type DiskIOProvider interface {
 	IOCounters(names ...string) (map[string]disk.IOCountersStat, error)
 }
@@ -181,14 +187,17 @@ func (s OSProcessSignaler) Signal(pid int32, startTime time.Time, signal os.Sign
 // OSHostMetricsProvider reads host metrics through gopsutil.
 type OSHostMetricsProvider struct{}
 
+// CPUCounts returns the number of logical CPUs, or physical cores when logical is false.
 func (p OSHostMetricsProvider) CPUCounts(logical bool) (int, error) {
 	return cpu.Counts(logical)
 }
 
+// CPUPercent returns host CPU usage over the interval, in total or per CPU.
 func (p OSHostMetricsProvider) CPUPercent(interval time.Duration, perCPU bool) ([]float64, error) {
 	return cpu.Percent(interval, perCPU)
 }
 
+// VirtualMemory returns host memory totals and usage.
 func (p OSHostMetricsProvider) VirtualMemory() (*mem.VirtualMemoryStat, error) {
 	return mem.VirtualMemory()
 }
@@ -196,22 +205,28 @@ func (p OSHostMetricsProvider) VirtualMemory() (*mem.VirtualMemoryStat, error) {
 // OSStorageProvider reads storage metadata through gopsutil.
 type OSStorageProvider struct{}
 
+// Partitions lists mounted filesystems; all includes pseudo filesystems.
 func (p OSStorageProvider) Partitions(all bool) ([]disk.PartitionStat, error) {
 	return disk.Partitions(all)
 }
 
+// Usage returns the size and usage of the filesystem mounted at path.
 func (p OSStorageProvider) Usage(path string) (*disk.UsageStat, error) {
 	return disk.Usage(path)
 }
 
+// OSNetworkProvider reads network counters through gopsutil.
 type OSNetworkProvider struct{}
 
+// IOCounters returns byte counters per interface, or summed when pernic is false.
 func (p OSNetworkProvider) IOCounters(pernic bool) ([]netio.IOCountersStat, error) {
 	return netio.IOCounters(pernic)
 }
 
+// OSDiskIOProvider reads disk counters from /proc/diskstats.
 type OSDiskIOProvider struct{}
 
+// IOCounters returns counters for the named devices, or for every device when none are named.
 func (p OSDiskIOProvider) IOCounters(names ...string) (map[string]disk.IOCountersStat, error) {
 	return readDiskStats(procRoot, names...)
 }

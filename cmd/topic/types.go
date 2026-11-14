@@ -9,6 +9,7 @@ import (
 // CgroupVersion denotes the cgroup version (1 or 2).
 type CgroupVersion int
 
+// The cgroup versions topic reads limits from.
 const (
 	CgroupV1 CgroupVersion = 1
 	CgroupV2 CgroupVersion = 2
@@ -30,6 +31,7 @@ type StaticInfo struct {
 	Integrations           []IntegrationStatus
 }
 
+// AppConfig holds the settings parsed from the command line.
 type AppConfig struct {
 	RefreshInterval   time.Duration
 	DisableGPU        bool
@@ -43,6 +45,7 @@ type AppConfig struct {
 	ShowVersion       bool
 }
 
+// ContainerMetadata describes the container topic runs in, as reported by Docker or Kubernetes.
 type ContainerMetadata struct {
 	Runtime   string            `json:"runtime,omitempty"`
 	ID        string            `json:"id,omitempty"`
@@ -82,6 +85,8 @@ func (m *ContainerMetadata) MergeFrom(other ContainerMetadata) {
 	}
 }
 
+// IntegrationStatus reports whether an optional integration (Docker, Kubernetes, NVML) is in use,
+// with a short reason.
 type IntegrationStatus struct {
 	Name      string `json:"name"`
 	Available bool   `json:"available"`
@@ -110,6 +115,7 @@ type StorageUsage struct {
 	UsedPercent float64
 }
 
+// NetworkUsage holds an interface's transfer rates since the previous refresh and its error totals.
 type NetworkUsage struct {
 	Name          string
 	RXBytesPerSec float64
@@ -118,6 +124,7 @@ type NetworkUsage struct {
 	TXErrors      uint64
 }
 
+// DiskIOUsage holds a block device's read and write rates since the previous refresh.
 type DiskIOUsage struct {
 	Name             string
 	ReadBytesPerSec  float64
@@ -126,6 +133,8 @@ type DiskIOUsage struct {
 	WriteOpsPerSec   float64
 }
 
+// CgroupEvents holds the cgroup's cumulative memory.events counters (high, oom, oom_kill) and
+// the number of throttled CPU periods from cpu.stat.
 type CgroupEvents struct {
 	MemoryHigh          uint64
 	MemoryOOM           uint64
@@ -133,29 +142,34 @@ type CgroupEvents struct {
 	CPUThrottledPeriods uint64
 }
 
+// PIDUsage holds the cgroup's process count and limit. MaxText is "max" when there is no limit.
 type PIDUsage struct {
 	Current uint64
 	Max     uint64
 	MaxText string
 }
 
+// PressureStat holds a resource's 10-second pressure stall averages, in percent.
 type PressureStat struct {
 	Resource  string
 	SomeAvg10 float64
 	FullAvg10 float64
 }
 
+// Alert is a warning or critical message shown under the resource rows.
 type Alert struct {
 	Level   string
 	Message string
 }
 
+// HistoryRing is a fixed-size ring of recent samples for one metric.
 type HistoryRing struct {
 	Values []float64
 	Next   int
 	Filled bool
 }
 
+// MetricsHistory holds the recent samples drawn as history rows.
 type MetricsHistory struct {
 	CPU     HistoryRing
 	Memory  HistoryRing
@@ -210,8 +224,10 @@ type ProcessInfo struct {
 	GPUMemMB      uint64
 }
 
+// ProcessSortColumn is a column the process table can be sorted by.
 type ProcessSortColumn int
 
+// The columns the process table can be sorted by.
 const (
 	SortByCPU ProcessSortColumn = iota
 	SortByMemory
@@ -252,6 +268,8 @@ type DynamicInfo struct {
 	Processes          []ProcessInfo
 }
 
+// DynamicSnapshot holds the values collected in one refresh, before they are published to
+// DynamicInfo.
 type DynamicSnapshot struct {
 	ContainerCPUUsage  float64
 	ContainerMemUsedGB float64
@@ -268,6 +286,8 @@ type DynamicSnapshot struct {
 	Processes          []ProcessInfo
 }
 
+// DynamicCollectorSet holds the collectors a refresh runs. A nil collector is skipped, so only the
+// ones that apply to this container are set.
 type DynamicCollectorSet struct {
 	ContainerCPU func() float64
 	ContainerMem func() float64
@@ -325,6 +345,8 @@ func (s *State) Static() StaticInfo {
 	return s.static
 }
 
+// NetworkCounter holds an interface's cumulative counters, kept to compute rates on the next
+// refresh.
 type NetworkCounter struct {
 	RXBytes uint64
 	TXBytes uint64
@@ -332,6 +354,8 @@ type NetworkCounter struct {
 	TXErrs  uint64
 }
 
+// DiskIOCounter holds a block device's cumulative counters, kept to compute rates on the next
+// refresh.
 type DiskIOCounter struct {
 	ReadBytes  uint64
 	WriteBytes uint64

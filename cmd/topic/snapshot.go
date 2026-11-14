@@ -13,6 +13,7 @@ import (
 
 const onceTextWidth = 120
 
+// ExportSnapshot is the document that --once --json prints.
 type ExportSnapshot struct {
 	Timestamp time.Time         `json:"timestamp"`
 	Static    StaticSnapshot    `json:"static"`
@@ -21,6 +22,8 @@ type ExportSnapshot struct {
 	Metadata  ContainerMetadata `json:"metadata,omitempty"`
 }
 
+// StaticSnapshot is the startup information in ExportSnapshot: limits, host size, GPUs, mounts,
+// and integration status.
 type StaticSnapshot struct {
 	CgroupVersion          CgroupVersion       `json:"cgroupVersion"`
 	ContainerCPULimit      float64             `json:"containerCpuLimit"`
@@ -35,6 +38,8 @@ type StaticSnapshot struct {
 	Integrations           []IntegrationStatus `json:"integrations,omitempty"`
 }
 
+// ExportHistory holds recent samples, oldest first: CPU, memory, and GPU in percent, network
+// and disk I/O in MiB/s.
 type ExportHistory struct {
 	CPU     []float64 `json:"cpu,omitempty"`
 	Memory  []float64 `json:"memory,omitempty"`
