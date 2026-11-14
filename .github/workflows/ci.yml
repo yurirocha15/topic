@@ -21,6 +21,10 @@ jobs:
   lint-and-test:
     name: Lint and Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Lets the Codecov upload authenticate with GitHub's OIDC token instead of a stored secret.
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -47,6 +51,15 @@ jobs:
 
       - name: Run tests
         run: make test
+
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push'
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./cmd/topic/coverage.out
+          use_oidc: true
+          # A Codecov outage must not fail the build.
+          fail_ci_if_error: false
 
       - name: Run NVML build tests
         run: make test-nvml
