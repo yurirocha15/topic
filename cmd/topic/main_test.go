@@ -2100,8 +2100,10 @@ func TestUpdateAll(t *testing.T) {
 	tolerance := 0.1
 
 	// Assert that the dynamic state has been populated correctly.
-	if (state.dynamic.ContainerCPUUsage-50.0) > tolerance || (50.0-state.dynamic.ContainerCPUUsage) > tolerance {
-		t.Errorf("Expected ContainerCPUUsage to be close to 50.0, got %.5f", state.dynamic.ContainerCPUUsage)
+	// One CPU-second over at least one wall-clock second on a 2 CPU limit is at most 50%. A slow
+	// scheduler can only add elapsed time, which lowers the reading slightly.
+	if state.dynamic.ContainerCPUUsage > 50.0+tolerance || state.dynamic.ContainerCPUUsage < 45.0 {
+		t.Errorf("Expected ContainerCPUUsage to be just under 50.0, got %.5f", state.dynamic.ContainerCPUUsage)
 	}
 	if (state.dynamic.ContainerMemUsedGB-1.0) > tolerance || (1.0-state.dynamic.ContainerMemUsedGB) > tolerance {
 		t.Errorf("Expected ContainerMemUsedGB to be close to 1.0, got %.2f", state.dynamic.ContainerMemUsedGB)
