@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-11-15
+
 ### Added
 
 - `go install github.com/yurirocha15/topic/cmd/topic@latest` installs `topic` with Go 1.26 or later.
@@ -135,7 +137,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Install script for Linux, including Alpine.
 - Static Linux binaries for amd64 and arm64.
 
-[Unreleased]: https://github.com/yurirocha15/topic/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/yurirocha15/topic/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/yurirocha15/topic/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/yurirocha15/topic/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/yurirocha15/topic/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/yurirocha15/topic/compare/v0.0.2...v0.0.3
